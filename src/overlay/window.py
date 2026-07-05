@@ -1,6 +1,5 @@
 """PyQt5 透明覆盖层窗口"""
 
-import ctypes
 import logging
 from typing import Optional, Callable
 
@@ -30,7 +29,7 @@ class OverlayWindow(QWidget):
         self.on_drag_move: Optional[Callable[[int, int, int, int], None]] = None
         self.on_drag_end: Optional[Callable[[int, int, int, int], None]] = None
 
-        # 窗口标志
+        # 窗口标志（与测试 B 验证过的组合一致）
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
@@ -38,6 +37,9 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+
+        # 启用鼠标追踪（不按按钮时也能收到 mouseMoveEvent）
+        self.setMouseTracking(True)
 
         # 刷新定时器
         self._timer = QTimer(self)
@@ -48,35 +50,16 @@ class OverlayWindow(QWidget):
         self._renderer = renderer
 
     def resize_to(self, x: int, y: int, w: int, h: int):
-        """调整覆盖层位置和尺寸"""
-        self.setGeometry(x, y, w, h)
-        logger.debug(f"覆盖层位置: ({x},{y}) {w}x{h}")
+        """仅当位置/尺寸变化时才设置（避免对已显示窗口重复调用 setGeometry）"""
+        current = self.geometry()
+        if (x, y, w, h) != (current.x(), current.y(), current.width(), current.height()):
+            self.setGeometry(x, y, w, h)
+            logger.debug(f"覆盖层位置更新: ({x},{y}) {w}x{h}")
 
     def _tick(self):
         self.update()
 
-    # ── 窗口显示后修复 Windows 点击穿透问题 ──
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        # 确保窗口创建后重新设置鼠标事件属性
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        # Windows: 清除 WS_EX_TRANSPARENT 标记
-        try:
-            hwnd = int(self.winId())
-            GWL_EXSTYLE = -20
-            WS_EX_TRANSPARENT = 0x00000020
-            WS_EX_LAYERED = 0x00080000
-            user32 = ctypes.windll.user32
-            current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            # 保留 WS_EX_LAYERED，清除 WS_EX_TRANSPARENT
-            new_style = (current | WS_EX_LAYERED) & ~WS_EX_TRANSPARENT
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
-            logger.debug("已清除 WS_EX_TRANSPARENT（Windows 点击穿透）")
-        except Exception as e:
-            logger.warning(f"清除 WS_EX_TRANSPARENT 失败: {e}")
-
-    # ── 鼠标事件 ──
+    # ── 鼠标事件（与测试 B 验证过的实现一致） ──
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:

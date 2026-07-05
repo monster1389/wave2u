@@ -28,7 +28,7 @@ from src.overlay.window import OverlayWindow
 from src.overlay.renderer import Renderer
 
 
-logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("nikke-overlay")
 
 

@@ -50,9 +50,9 @@ def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
                        np.array([LINE_HUE_LOWER, LINE_SAT_LOWER, LINE_VAL_LOWER]),
                        np.array([LINE_HUE_UPPER, LINE_SAT_UPPER, 255]))
 
-    # 2. 膨胀：把虚线连成实线
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.dilate(mask, kernel, iterations=2)
+    # 2. 形态学闭运算：填虚线缺口，不膨胀整体
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
     # 3. 统计颜色像素量
     color_px = cv2.countNonZero(mask)
@@ -62,7 +62,7 @@ def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     # 4. HoughLinesP 在颜色掩码上找线
     lines = cv2.HoughLinesP(
         mask, rho=1, theta=np.pi / 360,
-        threshold=50, minLineLength=60, maxLineGap=30,
+        threshold=50, minLineLength=40, maxLineGap=30,
     )
     if lines is None:
         return None

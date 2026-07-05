@@ -50,12 +50,21 @@ def test_bounce_off_side():
 
 
 def test_hit_block():
-    """发射击中方块 → 路径终止"""
-    sx, sy = FX + 10, FY + FH - 10
-    block = {"col": 1, "row": 1, "x": FX + 10, "y": FY + 10, "w": 50, "h": 50}
+    """发射击中方块 → 反弹（不终止）"""
+    sx, sy = FX + FW // 2, FY + FH - 50
+    block = {"col": 3, "row": 3, "x": FX + 200, "y": FY + 200, "w": 106, "h": 105}
     waypoints, reason, col, row = simulate(sx, sy, 0, -1, [block])
-    assert reason == HIT_BLOCK, f"expected HIT_BLOCK, got {reason}"
-    assert col == 1 and row == 1
+    assert reason == DROPPED, f"expected DROPPED (ball bounces and continues), got {reason}"
+    assert len(waypoints) > 50, "反弹后应该有足够多的路径点"
+    # 验证路径经过了方块区域
+    xs = [p[0] for p in waypoints]
+    assert max(xs) >= FX + 200, "应该到达方块区域"
+    # 验证路径在方块处有方向变化（反弹）
+    dir_changes = 0
+    for i in range(2, len(waypoints)):
+        if (waypoints[i][1]-waypoints[i-1][1])*(waypoints[i-1][1]-waypoints[i-2][1]) < 0:
+            dir_changes += 1
+    assert dir_changes >= 1, "应该在方块处产生反弹"
 
 
 def test_multiple_bounces():

@@ -1,10 +1,13 @@
 """QPainter 渲染器：绘制网格、方块、预判线"""
 
+import logging
 from typing import List, Optional, Tuple
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont
 from PyQt5.QtCore import Qt, QPointF
 
 from src.config import FX, FY, FW, FH, GRID_COLS, GRID_ROWS
+
+logger = logging.getLogger("nikke-overlay")
 
 
 class Renderer:
@@ -99,15 +102,18 @@ class Renderer:
         if self._diag_count % 30 == 0:
             xs = [p[0] for p in self.trajectory]
             ys = [p[1] for p in self.trajectory]
-            # 粗略分段：找 y 方向反射点
-            reflections = 0
+            # 统计方向变化（反射）
+            ref_x = ref_y = 0
             for i in range(2, n):
-                if (self.trajectory[i][1] - self.trajectory[i-1][1]) * \
-                   (self.trajectory[i-1][1] - self.trajectory[i-2][1]) < 0:
-                    reflections += 1
-            import logging
-            logging.getLogger('nikke-overlay').info(
-                f"轨迹绘制: {n}点 {total_segments}段 {reflections}次反射 "
+                if (self.trajectory[i][0]-self.trajectory[i-1][0]) * \
+                   (self.trajectory[i-1][0]-self.trajectory[i-2][0]) < 0:
+                    ref_x += 1
+                if (self.trajectory[i][1]-self.trajectory[i-1][1]) * \
+                   (self.trajectory[i-1][1]-self.trajectory[i-2][1]) < 0:
+                    ref_y += 1
+            logger.info(
+                f"轨迹绘制: {n}点 "
+                f"反射: x{ref_x} y{ref_y} "
                 f"x=({min(xs)},{max(xs)}) y=({min(ys)},{max(ys)})")
 
         for i in range(total_segments):

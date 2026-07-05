@@ -14,7 +14,7 @@ MAX_STEPS = 5000    # 最大步数（防死循环）
 BALL_RADIUS = 25    # 小球半径（像素），影响碰撞偏移
 
 # ── 覆盖层 ──
-OVERLAY_FPS = 30    # 覆盖层刷新率
+OVERLAY_FPS = 10    # 覆盖层刷新率
 DETECTION_INTERVAL = 0.15  # 方块检测间隔（秒），~7fps 响应游戏拖拽
 WINDOW_CHECK_INTERVAL = 1.0  # 窗口位置检测间隔（秒）
 

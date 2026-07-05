@@ -35,51 +35,54 @@ def detect_blocks(img: np.ndarray,
 
 
 def _full_detect(img: np.ndarray) -> List[Block]:
-    """边框边缘法检测初始方块"""
+    """多尺度方差 + Sobel 梯度 + 灰度标准差（原始方法）"""
     roi = img[FY:FY + FH, FX:FX + FW]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 30, 100)
+
+    var_map = multi_scale_variance(gray, [7, 15, 25])
+    gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    mag_map = np.sqrt(gx * gx + gy * gy)
 
     cell_w = FW / GRID_COLS
     cell_h = FH / GRID_ROWS
-    BORDER_INNER, BORDER_OUTER = 3, 20
 
     cells = []
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
             cx = int(col * cell_w); cy = int(row * cell_h)
             cw = max(int(cell_w), 1); ch = max(int(cell_h), 1)
-            cell_edges = edges[cy:cy + ch, cx:cx + cw]
-
-            # 边框环形掩码
-            mask = np.zeros((ch, cw), dtype=np.uint8)
-            cv2.rectangle(mask, (BORDER_INNER, BORDER_INNER),
-                          (cw - BORDER_INNER - 1, ch - BORDER_INNER - 1), 255, -1)
-            cv2.rectangle(mask, (BORDER_OUTER, BORDER_OUTER),
-                          (cw - BORDER_OUTER - 1, ch - BORDER_OUTER - 1), 0, -1)
-
-            ring = cv2.bitwise_and(cell_edges, cell_edges, mask=mask)
-            ring_area = cv2.countNonZero(mask)
-            edge_ratio = cv2.countNonZero(ring) / ring_area if ring_area > 0 else 0
-            score = round(edge_ratio * 1000, 1)
+            var = np.mean(var_map[cy:cy + ch, cx:cx + cw])
+            edge = np.mean(mag_map[cy:cy + ch, cx:cx + cw])
+            std = np.std(gray[cy:cy + ch, cx:cx + cw])
+            score = var * 1.0 + edge * 0.02 + std * 0.5
 
             cells.append({"col": col + 1, "row": row + 1,
                           "x": cx + FX, "y": cy + FY,
-                          "w": cw, "h": ch, "score": score})
+                          "w": cw, "h": ch, "score": round(score, 1)})
 
-    # 自适应阈值
+    # 自适应阈值找断层
     scores = sorted([c["score"] for c in cells], reverse=True)
-    max_drop, threshold = 0, 4.0
+    max_drop, threshold = 0, 50.0
     for i in range(1, len(scores)):
         drop = scores[i - 1] - scores[i]
         if drop > max_drop:
             max_drop, threshold = drop, (scores[i - 1] + scores[i]) / 2
-    if max_drop < 1:
-        threshold = 4.0
+    if max_drop < 5:
+        threshold = 50.0
 
     blocks = [c for c in cells if c["score"] > threshold]
     blocks.sort(key=lambda b: (b["row"], b["col"]))
     return blocks
+
+
+def multi_scale_variance(gray: np.ndarray, windows: list[int]) -> np.ndarray:
+    acc = np.zeros_like(gray, dtype=np.float32)
+    for ws in windows:
+        mean = cv2.boxFilter(gray.astype(np.float32), -1, (ws, ws))
+        sq_mean = cv2.boxFilter(gray.astype(np.float32) ** 2, -1, (ws, ws))
+        acc += np.sqrt(np.maximum(0, sq_mean - mean * mean))
+    return acc / len(windows)
 
 
 def _diff_update(img: np.ndarray, prev_img: np.ndarray,

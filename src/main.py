@@ -26,7 +26,7 @@ from src.detection.launch_point import detect_launch_point
 from src.physics.trajectory import simulate
 from src.overlay.window import OverlayWindow
 from src.overlay.renderer import Renderer
-from src.overlay.input_handler import InputHandler
+
 
 logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("nikke-overlay")
@@ -42,11 +42,14 @@ class NikkeOverlayApp:
         self.window_tracker = GameWindowTracker()
         self.renderer = Renderer()
         self.overlay = OverlayWindow(renderer=self.renderer)
-        self.input_handler = InputHandler(self.overlay)
 
         # 状态
         self._blocks: list = []
-        self._launch_point: Optional[Tuple[int, int]] = None
+
+        # 连接鼠标回调（直接在 OverlayWindow 上）
+        self.overlay.on_drag_start = self._on_drag_start
+        self.overlay.on_drag_move = self._on_drag_move
+        self.overlay.on_drag_end = self._on_drag_end
 
         # 定时器
         self._detect_timer = QTimer(self.app)
@@ -56,11 +59,6 @@ class NikkeOverlayApp:
         self._window_timer = QTimer(self.app)
         self._window_timer.timeout.connect(self._check_window)
         self._window_timer.start(int(WINDOW_CHECK_INTERVAL * 1000))
-
-        # 连接鼠标回调
-        self.input_handler.on_drag_start = self._on_drag_start
-        self.input_handler.on_drag_move = self._on_drag_move
-        self.input_handler.on_drag_end = self._on_drag_end
 
     def _check_window(self):
         """检测窗口位置变化"""
@@ -116,9 +114,12 @@ class NikkeOverlayApp:
 
     def _on_drag_start(self, sx: int, sy: int):
         """点击时以鼠标位置为发射起点"""
-        self._launch_point = (sx, sy)
         self.renderer.launch_point = (sx, sy)
         logger.info(f"发射点已设置: ({sx}, {sy})")
+        # 以发射点的网格坐标更新覆盖层位置
+        from src.config import FX, FY, FW, FH
+        if not (FX <= sx <= FX + FW and FY <= sy <= FY + FH):
+            logger.debug(f"点击在网格外 ({sx},{sy})")
 
     def _on_drag_move(self, sx: int, sy: int, mx: int, my: int):
         """拖拽移动 → 更新预判线"""

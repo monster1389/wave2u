@@ -18,7 +18,7 @@ def test_drop_straight_down():
 
 def test_bounce_off_top():
     """向上发射碰到上边界 → 反弹向下"""
-    sx, sy = FX + FW // 2, FY + 30
+    sx, sy = FX + FW // 2, FY + BALL_RADIUS + 30
     blocks = []
     waypoints, reason, col, row = simulate(sx, sy, 0, -1, blocks)
     assert reason == DROPPED, f"expected DROPPED, got {reason}"
@@ -70,7 +70,7 @@ def test_multiple_bounces():
 
 def test_degenerate_vertical():
     """垂直向上发射 → 顶部反弹后底部掉落"""
-    sx, sy = FX + FW // 2, FY + 10
+    sx, sy = FX + FW // 2, FY + BALL_RADIUS + 10
     blocks = []
     waypoints, reason, col, row = simulate(sx, sy, 0, -1, blocks)
     assert reason == DROPPED

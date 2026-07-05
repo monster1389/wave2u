@@ -1,8 +1,8 @@
 """
-测试：WindowStaysOnTopHint VS SetWindowPos HWND_TOP 对点击穿透的影响
+测试 WindowStaysOnTopHint 是否阻止了点击穿透。
 
-测试 A: 无 WindowStaysOnTopHint，用 SetWindowPos 保持在最上
-测试 B: 有 WindowStaysOnTopHint (原始方案)
+Test C: 用 SetWindowPos 同时保持 TOPMOST 但检查 WS_EX_TRANSPARENT 是否生效
+Test D: 完全不用 Qt 窗口标志，全部用 Windows API 创建覆盖层
 
 运行：
     .venv/Scripts/python scripts/test_clickthrough.py
@@ -13,25 +13,32 @@ import ctypes
 import logging
 from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPainter, QColor, QCursor
+from PyQt5.QtGui import QPainter, QColor, QCursor, QPaintDevice
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger("ct-test")
 
 VK_LBUTTON = 0x01
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_LAYERED = 0x00080000
+WS_EX_TOPMOST = 0x00000008
+HWND_TOPMOST = -1
 HWND_TOP = 0
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
+SWP_NOACTIVATE = 0x0010
+SWP_SHOWWINDOW = 0x0040
 
 
-class TestA(QWidget):
-    """无 WindowStaysOnTopHint + SetWindowPos HWND_TOP"""
+class TestC(QWidget):
+    """WindowStaysOnTopHint + showEvent 中验证 WS_EX_TRANSPARENT"""
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Test A (HWND_TOP)")
+        self.setWindowTitle("Test C (TOPMOST + verify)")
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.Tool
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
@@ -46,38 +53,42 @@ class TestA(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        # 用 SetWindowPos 推到 Z 序最上面（不是 topmost）
         try:
             hwnd = int(self.winId())
-            ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
-            log.info("Test A: SetWindowPos HWND_TOP 已执行")
+            user32 = ctypes.windll.user32
+            # 验证窗口样式
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            has_transparent = bool(style & WS_EX_TRANSPARENT)
+            has_topmost = bool(style & WS_EX_TOPMOST)
+            has_layered = bool(style & WS_EX_LAYERED)
+            log.info(f"Test C WS_EX: TRANSPARENT={has_transparent} TOPMOST={has_topmost} LAYERED={has_layered}")
         except Exception as e:
-            log.warning(f"SetWindowPos 失败: {e}")
+            log.warning(f"showEvent: {e}")
 
     def _tick(self):
         self.update()
-        # 每帧重新确保 Z 序
         left_down = (ctypes.windll.user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
         if left_down and not self._prev_left:
             self._clicks += 1
             pos = QCursor.pos()
-            log.info(f"🖱️ Test A 检测到全局点击 #{self._clicks}: ({pos.x()}, {pos.y()})")
+            log.info(f"🖱️ Test C 全局点击 #{self._clicks}: ({pos.x()}, {pos.y()})")
+            log.info(f"   可以点到底层窗口吗？{'✅ 能' if False else '❌ 需要你告诉我'}")
         self._prev_left = left_down
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(255, 0, 0, 25))
+        painter.fillRect(self.rect(), QColor(0, 0, 255, 25))
         painter.setPen(QColor(255, 255, 255))
-        painter.drawText(100, 100, f"Test A (HWND_TOP) — 点击应穿透")
-        painter.drawText(100, 130, f"全局点击: {self._clicks}")
+        painter.drawText(100, 100, f"Test C: WindowStaysOnTopHint + WA_TransparentForMouseEvents")
+        painter.drawText(100, 130, f"点击穿透测试 — 看能否点到底层窗口")
         painter.end()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
-    # 只运行 Test A
-    w = TestA()
+    w = TestC()
     w.show()
-    log.info("Test A 已显示（红色），请点击覆盖层下方 — 看是否能点到底层窗口")
+    log.info("Test C 已显示（蓝色），请尝试点击覆盖层下方的窗口")
+    log.info("如果点击能穿透 → 告诉我")
+    log.info("如果点击不能穿透 → 也告诉我")
     sys.exit(app.exec_())

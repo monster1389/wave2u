@@ -11,7 +11,7 @@ GRID_ROWS = 8
 # ── 轨迹模拟 ──
 STEP_SIZE = 2       # 每步推进像素
 MAX_STEPS = 5000    # 最大步数（防死循环）
-BALL_RADIUS = 50    # 小球半径（像素），影响碰撞偏移
+BALL_RADIUS = 25    # 小球半径（像素），影响碰撞偏移
 
 # ── 覆盖层 ──
 OVERLAY_FPS = 30    # 覆盖层刷新率

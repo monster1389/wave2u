@@ -45,6 +45,7 @@ class NikkeOverlayApp:
         # 状态
         self._blocks: list = []
         self._prev_frame = None     # 上一帧（用于帧差法）
+        self._frame_count = 0       # 帧计数（用于定期全量检测）
         self._miss_count = 0          # 连续未检测到轨迹线的次数
         self._last_traj_data = None   # (lx, ly, dx, dy) 上次有效的轨迹
         self._max_miss = 3            # 最多保持3帧（~450ms）
@@ -87,11 +88,14 @@ class NikkeOverlayApp:
             screenshot = pyautogui.screenshot()
             frame = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
-            # 1. 检测方块
-            blocks = detect_blocks(frame)
-            if blocks:
-                self._blocks = blocks
-                self.renderer.blocks = blocks
+            # 1. 检测方块（帧差法，首次或每30帧做全量检测）
+            blocks = detect_blocks(
+                frame, self._prev_frame, self._blocks,
+                force_full=(self._frame_count % 30 == 0)
+            )
+            self._blocks = blocks
+            self.renderer.blocks = blocks
+            self._frame_count += 1
 
             # 2. 帧差法检测轨迹线
             traj = detect_trajectory(frame, self._prev_frame)

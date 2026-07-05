@@ -1,11 +1,12 @@
 """
 NIKKE 实时预判线覆盖层 — 入口点
 
-启动流程：
-  1. 初始化窗口跟踪器
-  2. 初始化检测模块
-  3. 创建并显示 PyQt5 覆盖层
-  4. 启动主循环（QTimer 驱动）
+工作流程：
+  1. 实时截图检测游戏轨迹线（淡青色）
+  2. 从轨迹线提取发射点 + 方向
+  3. 模拟含反射的完整反弹路径
+  4. 显示在覆盖层上
+  5. 游戏轨迹消失 → 覆盖层自动清除
 
 Usage:
     .venv/Scripts/python -m src.main
@@ -13,7 +14,6 @@ Usage:
 
 import sys
 import logging
-from typing import Optional, Tuple
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer
@@ -22,11 +22,10 @@ from PyQt5.QtGui import QColor
 from src.config import DETECTION_INTERVAL, WINDOW_CHECK_INTERVAL
 from src.game_window import GameWindowTracker
 from src.detection.blocks import detect_blocks
-from src.detection.launch_point import detect_launch_point
+from src.detection.launch_point import detect_trajectory
 from src.physics.trajectory import simulate
 from src.overlay.window import OverlayWindow
 from src.overlay.renderer import Renderer
-
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("nikke-overlay")
@@ -46,11 +45,6 @@ class NikkeOverlayApp:
         # 状态
         self._blocks: list = []
 
-        # 连接鼠标回调（直接在 OverlayWindow 上）
-        self.overlay.on_drag_start = self._on_drag_start
-        self.overlay.on_drag_move = self._on_drag_move
-        self.overlay.on_drag_end = self._on_drag_end
-
         # 定时器
         self._detect_timer = QTimer(self.app)
         self._detect_timer.timeout.connect(self._run_detection)
@@ -69,7 +63,6 @@ class NikkeOverlayApp:
             if not self.overlay.isVisible():
                 self.overlay.show()
                 logger.info(f"覆盖层已显示: ({x},{y}) {w}x{h}")
-                logger.info("请在覆盖层上点击并拖拽来查看预判轨迹")
         else:
             if self.overlay.isVisible():
                 self.overlay.hide()
@@ -78,7 +71,7 @@ class NikkeOverlayApp:
             self.renderer.status_color = QColor(200, 0, 0)
 
     def _run_detection(self):
-        """运行检测管线"""
+        """检测游戏轨迹线 → 模拟完整反弹路径 → 显示"""
         if not self.window_tracker.is_found:
             return
 
@@ -90,59 +83,38 @@ class NikkeOverlayApp:
             screenshot = pyautogui.screenshot()
             frame = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
-            # 方块检测
+            # 1. 检测方块
             blocks = detect_blocks(frame)
             if blocks:
                 self._blocks = blocks
                 self.renderer.blocks = blocks
-                logger.info(f"检测到 {len(blocks)} 个方块")
 
-            # 发射点检测（仅首次，且仅当用户未手动点击设置时）
-            if self.renderer.launch_point is None:
-                pt = detect_launch_point(frame)
-                if pt:
-                    self.renderer.launch_point = pt
-                    logger.info(f"【CV检测】发射点: {pt}")
-                    self.renderer.status_text = "Ready"
-                    self.renderer.status_color = QColor(0, 200, 0)
-                else:
-                    self.renderer.status_text = "Detecting..."
+            # 2. 检测游戏轨迹线（按住拖拽时游戏会画淡青色线）
+            traj = detect_trajectory(frame)
+            if traj:
+                lx, ly, dx, dy = traj
+                # 更新发射点显示
+                self.renderer.launch_point = (lx, ly)
+
+                # 3. 模拟完整反弹路径
+                waypoints, reason, col, row = simulate(lx, ly, dx, dy, self._blocks)
+                self.renderer.trajectory = waypoints
+                if waypoints:
+                    self.renderer.endpoint = waypoints[-1]
+
+                self.renderer.status_text = "预测中"
+                self.renderer.status_color = QColor(0, 200, 0)
+            else:
+                # 游戏没画轨迹线（没在拖拽）→ 清除预判线
+                if self.renderer.trajectory:
+                    self.renderer.trajectory = []
+                    self.renderer.endpoint = None
+                    self.renderer.is_dragging = False
+                    self.renderer.status_text = "就绪"
+                    self.renderer.status_color = QColor(100, 100, 100)
 
         except Exception as e:
             logger.warning(f"检测失败: {e}")
-
-    def _on_drag_start(self, sx: int, sy: int):
-        """点击 → 开始拖拽瞄准"""
-        if self.renderer.launch_point is None:
-            logger.warning("发射点尚未检测到，请等待 CV 检测")
-            return
-        logger.info(f"拖拽开始, 发射点=({self.renderer.launch_point[0]},{self.renderer.launch_point[1]})")
-
-    def _on_drag_move(self, sx: int, sy: int, mx: int, my: int):
-        """拖拽移动 → 更新预判线"""
-        lp = self.renderer.launch_point
-        if lp is None:
-            return
-        lx, ly = lp
-        # 方向 = 从 CV 检测的发射点到鼠标当前位置
-        dx = mx - lx
-        dy = my - ly
-        logger.debug(f"拖拽: launch=({lx},{ly}) mouse=({mx},{my}) dir=({dx},{dy})")
-
-        self.renderer.is_dragging = True
-        self.renderer.mouse_pos = (mx, my)
-
-        # 模拟轨迹
-        waypoints, reason, col, row = simulate(lx, ly, dx, dy, self._blocks)
-        logger.debug(f"轨迹: {len(waypoints)} 个路径点, reason={reason}, hit=({col},{row})")
-        self.renderer.trajectory = waypoints
-        if waypoints:
-            self.renderer.endpoint = waypoints[-1]
-
-    def _on_drag_end(self, sx: int, sy: int, mx: int, my: int):
-        """松开鼠标 → 锁定路径（淡显保留参考）"""
-        self.renderer.is_dragging = False
-        logger.info(f"拖拽结束, 方向=({mx - self.renderer.launch_point[0]},{my - self.renderer.launch_point[1]})" if self.renderer.launch_point else "拖拽结束")
 
     def run(self):
         """启动应用"""

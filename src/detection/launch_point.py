@@ -29,18 +29,53 @@ def _make_line_mask(img: np.ndarray) -> np.ndarray:
     return mask
 
 
-def detect_launch_point(img: np.ndarray) -> Optional[Tuple[int, int]]:
+def detect_trajectory(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     """
-    检测小球发射点。
+    检测游戏轨迹线，返回 (launch_x, launch_y, dir_x, dir_y)。
 
-    通过找到游戏自带的轨迹线，取其底部端点作为发射点。
+    launch = 底部端点（发射点）
+    dir = 从发射点指向顶部端点的方向向量
 
     Args:
         img: BGR 截图
 
     Returns:
-        (x, y) 发射点坐标，或 None（未检测到）
+        (lx, ly, dx, dy) 或 None
     """
+    result = _find_best_line(img)
+    if result is None:
+        return None
+
+    x1, y1, x2, y2 = result
+    # 底部端点 = 发射点（y 较大的点）
+    if y1 > y2:
+        lx, ly, tx, ty = x1, y1, x2, y2
+    else:
+        lx, ly, tx, ty = x2, y2, x1, y1
+
+    dx = tx - lx
+    dy = ty - ly
+    return (int(lx), int(ly), int(dx), int(dy))
+
+
+def detect_launch_point(img: np.ndarray) -> Optional[Tuple[int, int]]:
+    """
+    检测小球发射点（只返回坐标）。
+
+    Args:
+        img: BGR 截图
+
+    Returns:
+        (x, y) 发射点坐标，或 None
+    """
+    traj = detect_trajectory(img)
+    if traj is None:
+        return None
+    return (traj[0], traj[1])
+
+
+def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+    """找到最佳的轨迹线，返回绝对坐标 (x1,y1,x2,y2)"""
     mask = _make_line_mask(img)
 
     lines = cv2.HoughLinesP(
@@ -77,10 +112,4 @@ def detect_launch_point(img: np.ndarray) -> Optional[Tuple[int, int]]:
             best_score = score
             best_line = (x1 + FX, y1 + FY, x2 + FX, y2 + FY)
 
-    if best_line is None:
-        return None
-
-    x1, y1, x2, y2 = best_line
-    # 返回底部端点（y 较大的点）
-    pt = (x1, y1) if y1 > y2 else (x2, y2)
-    return (int(pt[0]), int(pt[1]))
+    return best_line

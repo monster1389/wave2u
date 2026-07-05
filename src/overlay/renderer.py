@@ -121,4 +121,4 @@ class Renderer:
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255, 180))
         painter.drawText(win_w // 2 - 200, win_h // 2,
-                         "点击并拖拽以查看预判轨迹")
+                         "在游戏中瞄准以查看预判轨迹")

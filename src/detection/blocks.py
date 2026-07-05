@@ -27,12 +27,17 @@ def detect_blocks(img: np.ndarray,
 
 
 def _full_detect(img: np.ndarray) -> List[Block]:
-    """Otsu 二值化：方块有前景内容，空格只有背景"""
+    """用格子四周的边缘检测方块：方块有清晰边框，空格没有"""
     roi = img[FY:FY + FH, FX:FX + FW]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
+    # 全局 Canny 边缘检测
+    edges = cv2.Canny(gray, 30, 100)
+
     cell_w = FW / GRID_COLS
     cell_h = FH / GRID_ROWS
+    BORDER_INNER = 4    # 边框内缘（px，从格子边缘向内）
+    BORDER_OUTER = 16   # 边框外缘
 
     cells = []
     for row in range(GRID_ROWS):
@@ -42,24 +47,24 @@ def _full_detect(img: np.ndarray) -> List[Block]:
             cw = max(int(cell_w), 1)
             ch = max(int(cell_h), 1)
 
-            cell_gray = gray[cy:cy + ch, cx:cx + cw]
+            cell_edges = edges[cy:cy + ch, cx:cx + cw]
 
-            # Otsu 自适应二值化
-            _, thresh = cv2.threshold(cell_gray, 0, 255,
-                                      cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            # 创建边框环形掩码（格子内侧 BORDER_INNER 到 BORDER_OUTER 像素的环）
+            border_mask = np.zeros((ch, cw), dtype=np.uint8)
+            cv2.rectangle(border_mask,
+                          (BORDER_INNER, BORDER_INNER),
+                          (cw - BORDER_INNER - 1, ch - BORDER_INNER - 1), 255, -1)
+            cv2.rectangle(border_mask,
+                          (BORDER_OUTER, BORDER_OUTER),
+                          (cw - BORDER_OUTER - 1, ch - BORDER_OUTER - 1), 0, -1)
 
-            # 去除小连通域（网格线、噪声）
-            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-                thresh, 8, cv2.CV_32S)
-            clean = np.zeros_like(thresh)
-            fg_px = 0
-            for i in range(1, num_labels):
-                area = stats[i, cv2.CC_STAT_AREA]
-                if area >= 60:  # 面积≥60像素才算
-                    clean[labels == i] = 255
-                    fg_px += area
+            # 环内的边缘像素
+            ring_edges = cv2.bitwise_and(cell_edges, cell_edges, mask=border_mask)
+            ring_edge_count = cv2.countNonZero(ring_edges)
+            ring_area = cv2.countNonZero(border_mask)
+            edge_ratio = ring_edge_count / ring_area if ring_area > 0 else 0
 
-            ratio = fg_px / (cw * ch) * 100
+            score = round(edge_ratio * 1000, 1)  # 放大分数
 
             cells.append({
                 "col": col + 1,
@@ -68,12 +73,22 @@ def _full_detect(img: np.ndarray) -> List[Block]:
                 "y": cy + FY,
                 "w": cw,
                 "h": ch,
-                "score": round(ratio, 1),
+                "score": score,
             })
 
-    # 方块的前景比例在 15%-80% 之间（角色覆盖部分格子）
-    # 空格要么几乎全黑（<5%），要么几乎全白（>90%）
-    blocks = [c for c in cells if 15 < c["score"] < 80]
+    # 自适应阈值：找显著断层
+    scores = sorted([c["score"] for c in cells], reverse=True)
+    max_drop = 0
+    threshold = 10.0
+    for i in range(1, len(scores)):
+        drop = scores[i - 1] - scores[i]
+        if drop > max_drop:
+            max_drop = drop
+            threshold = (scores[i - 1] + scores[i]) / 2
+    if max_drop < 3:
+        threshold = 10.0
+
+    blocks = [c for c in cells if c["score"] > threshold]
     blocks.sort(key=lambda b: (b["row"], b["col"]))
     return blocks
 

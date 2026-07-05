@@ -13,3 +13,8 @@ docs/superpowers
 # IDE
 .vscode/
 .idea/
+
+# Release
+dist/
+release/
+点我启动.bat

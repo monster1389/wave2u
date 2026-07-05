@@ -44,6 +44,7 @@ class NikkeOverlayApp:
 
         # 状态
         self._blocks: list = []
+        self._prev_frame = None     # 上一帧（用于帧差法）
         self._miss_count = 0          # 连续未检测到轨迹线的次数
         self._last_traj_data = None   # (lx, ly, dx, dy) 上次有效的轨迹
         self._max_miss = 3            # 最多保持3帧（~450ms）
@@ -92,8 +93,9 @@ class NikkeOverlayApp:
                 self._blocks = blocks
                 self.renderer.blocks = blocks
 
-            # 2. 检测游戏轨迹线（按住拖拽时游戏会画淡青色线）
-            traj = detect_trajectory(frame)
+            # 2. 帧差法检测轨迹线
+            traj = detect_trajectory(frame, self._prev_frame)
+            self._prev_frame = frame.copy()
             if traj:
                 self._miss_count = 0
                 self._last_traj_data = traj

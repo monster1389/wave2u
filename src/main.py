@@ -47,6 +47,7 @@ class NikkeOverlayApp:
         self._prev_frame = None     # 上一帧（用于帧差法）
         self._frame_count = 0       # 帧计数（用于定期全量检测）
         self._traj_was_present = False  # 上一帧是否有轨迹线
+        self._refresh_delay = 0     # 轨迹消失后延迟刷新计数
         self._miss_count = 0          # 连续未检测到轨迹线的次数
         self._last_traj_data = None   # (lx, ly, dx, dy) 上次有效的轨迹
         self._max_miss = 3            # 最多保持3帧（~450ms）
@@ -94,15 +95,23 @@ class NikkeOverlayApp:
 
             # 1. 检测方块：只在轨迹线不出现时更新（避免轨迹干扰）
             if traj is None:
-                # 轨迹线刚消失 → 立刻全量刷新方块（反映刚被消除的方块）
-                force = self._traj_was_present or (self._frame_count % 30 == 0)
-                blocks = detect_blocks(
-                    frame, self._prev_frame, self._blocks,
-                    force_full=force
-                )
-                self._blocks = blocks
-                self.renderer.blocks = blocks
-                self._frame_count += 1
+                # 轨迹线刚消失 → 延迟 0.3 秒，期间不更新方块
+                if self._traj_was_present:
+                    self._refresh_delay = 2  # 2帧 ≈ 0.3s
+
+                if self._refresh_delay > 0:
+                    self._refresh_delay -= 1
+                    # 延迟期内不更新方块（避免轨迹残影造成误判）
+                    pass
+                else:
+                    force = self._frame_count % 30 == 0
+                    blocks = detect_blocks(
+                        frame, self._prev_frame, self._blocks,
+                        force_full=force
+                    )
+                    self._blocks = blocks
+                    self.renderer.blocks = blocks
+                    self._frame_count += 1
 
             self._traj_was_present = traj is not None
             self._prev_frame = frame.copy()

@@ -1,6 +1,7 @@
 """发射点检测模块
 
-利用游戏自带的淡青色轨迹线定位发射点。
+先用边缘检测找网格内所有线条，再用特征评分识别轨迹线。
+不依赖颜色，只依赖"轨迹线是一条斜线，从网格底部发出"这个几何特征。
 """
 
 from typing import Optional, Tuple
@@ -9,28 +10,12 @@ import numpy as np
 
 from src.config import FX, FY, FW, FH
 
-# 轨迹线颜色 — 淡青色 HSV 范围
-LINE_COLOUR_LOWER = np.array([85, 15, 180])
-LINE_COLOUR_UPPER = np.array([105, 100, 255])
-
-
-def _make_line_mask(img: np.ndarray) -> np.ndarray:
-    """创建轨迹线 HSV 掩码"""
-    roi = img[FY:FY + FH, FX:FX + FW]
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, LINE_COLOUR_LOWER, LINE_COLOUR_UPPER)
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    return mask
-
 
 def detect_trajectory(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     """
     检测游戏轨迹线，返回 (launch_x, launch_y, dir_x, dir_y)。
 
-    launch = 底部端点（发射点）
-    dir = 从发射点指向顶部端点的方向向量
+    使用边缘检测 + 线条特征评分，不依赖颜色。
 
     Args:
         img: BGR 截图
@@ -55,15 +40,7 @@ def detect_trajectory(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
 
 
 def detect_launch_point(img: np.ndarray) -> Optional[Tuple[int, int]]:
-    """
-    检测小球发射点（只返回坐标）。
-
-    Args:
-        img: BGR 截图
-
-    Returns:
-        (x, y) 发射点坐标，或 None
-    """
+    """检测小球发射点（只返回坐标）"""
     traj = detect_trajectory(img)
     if traj is None:
         return None
@@ -71,53 +48,66 @@ def detect_launch_point(img: np.ndarray) -> Optional[Tuple[int, int]]:
 
 
 def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
-    """找到最佳的轨迹线，返回绝对坐标 (x1,y1,x2,y2)"""
-    mask = _make_line_mask(img)
+    """用边缘检测找网格内最像轨迹线的线条"""
+    roi = img[FY:FY + FH, FX:FX + FW]
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-    # 如果掩码中几乎没有白色像素，说明轨迹线不在画面上
-    white_px = cv2.countNonZero(mask)
-    if white_px < 200:  # 至少要有一定量的淡青色像素
+    # 边缘检测
+    edges = cv2.Canny(gray, 30, 100)
+
+    # 统计边缘像素数，太少说明网格内没有显著线条
+    edge_px = cv2.countNonZero(edges)
+    if edge_px < 100:
         return None
 
+    # 霍夫变换找直线
     lines = cv2.HoughLinesP(
-        mask, rho=1, theta=np.pi / 360,
-        threshold=50, minLineLength=60, maxLineGap=30,  # 调高阈值减少噪声
+        edges, rho=1, theta=np.pi / 360,
+        threshold=40, minLineLength=50, maxLineGap=20,
     )
     if lines is None:
         return None
 
-    MIN_SCORE = 0.35  # 低于此分数的认为是噪声
+    MIN_SCORE = 0.3
     best_line, best_score = None, -1
     grid_bottom = FY + FH
+    grid_center_x = FX + FW // 2
 
     for l in lines:
         x1, y1, x2, y2 = l
-        dx, dy = x2 - x1, y2 - y1
-        length = np.sqrt(dx * dx + dy * dy)
-        if length < 40:
+        length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+        if length < 30:
             continue
 
-        # 排除水平/垂直线（轨迹线是斜的）
-        horiz = abs(dx / max(length, 1))
-        if horiz > 0.97 or horiz < 0.08:
+        # 方向向量
+        dx_f, dy_f = x2 - x1, y2 - y1
+
+        # 排除水平/垂直线
+        horiz = abs(dx_f / max(length, 1))
+        if horiz > 0.95 or horiz < 0.10:
             continue
 
-        # 底部端点应该在网格下半部分
-        bottom_y = max(y1, y2)
-        if bottom_y < FY + FH * 0.35:
+        # 轨迹线从网格底部发出：至少一个端点在网格下半部
+        max_y = max(y1, y2)
+        min_y = min(y1, y2)
+        if max_y < FH * 0.3:  # 两个端点都在上半部 → 不是
             continue
 
-        # 评分
-        length_score = min(length / 250, 1.0)
-        bottom_score = (bottom_y - FY) / FH
-        score = length_score * 0.5 + bottom_score * 0.5
+        # 轨迹线朝上：顶部端点比底部端点至少高 50px
+        top_y = min_y
+        if (max_y - top_y) < 50:
+            continue
+
+        # 评分：线越长越好，底部越靠下越好，向上幅度越大越好
+        length_score = min(length / 300, 1.0)
+        bottom_score = max_y / FH
+        upward_score = min((max_y - top_y) / 200, 1.0)
+        score = length_score * 0.35 + bottom_score * 0.35 + upward_score * 0.3
 
         if score > best_score:
             best_score = score
             best_line = (x1 + FX, y1 + FY, x2 + FX, y2 + FY)
 
-    # 分数不够 → 拒绝
     if best_score < MIN_SCORE:
         return None
-
     return best_line

@@ -24,8 +24,13 @@ def main():
     print("轨迹线检测调试")
     print("=" * 50)
 
-    # 1. 截图
-    print("\n[1] 截图...")
+    # 1. 等待 + 截图
+    print("\n[1] 5秒后截图，请在游戏内按住拖拽显示轨迹线...")
+    import time
+    for i in range(5, 0, -1):
+        print(f"    {i}...")
+        time.sleep(1)
+    print("    截图！")
     s = pyautogui.screenshot()
     frame = cv2.cvtColor(np.array(s), cv2.COLOR_RGB2BGR)
     print(f"    分辨率: {frame.shape[1]}x{frame.shape[0]}")

@@ -25,6 +25,9 @@ class Renderer:
         """主绘制方法"""
         painter.setRenderHint(QPainter.Antialiasing)
 
+        # 淡色背景：让覆盖层可见
+        painter.fillRect(0, 0, win_w, win_h, QColor(0, 0, 0, 25))
+
         self._draw_grid(painter)
         self._draw_blocks(painter)
         if self.launch_point:
@@ -36,6 +39,8 @@ class Renderer:
         if self.endpoint:
             self._draw_endpoint(painter)
         self._draw_status(painter, win_w, win_h)
+        if not self.trajectory and not self.is_dragging:
+            self._draw_hint(painter, win_w, win_h)
 
     def _draw_grid(self, painter: QPainter):
         """绘制网格轮廓"""
@@ -109,3 +114,11 @@ class Renderer:
         painter.setFont(font)
         painter.setPen(self.status_color)
         painter.drawText(win_w - 120, win_h - 10, self.status_text)
+
+    def _draw_hint(self, painter: QPainter, win_w: int, win_h: int):
+        """绘制操作提示"""
+        font = QFont("Arial", 14)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255, 180))
+        painter.drawText(win_w // 2 - 200, win_h // 2,
+                         "点击并拖拽以查看预判轨迹")

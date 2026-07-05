@@ -12,10 +12,6 @@ from src.config import FX, FY, FW, FH, GRID_COLS, GRID_ROWS
 
 Block = dict  # {col, row, x, y, w, h}
 
-# 方块颜色范围（高饱和度青色）
-BLOCK_LOWER = np.array([85, 120, 80])    # H=85-115, S≥120, V≥80
-BLOCK_UPPER = np.array([115, 255, 255])
-
 # 每格像素变化阈值
 CELL_CHANGE_THRESHOLD = 30
 CELL_CHANGE_RATIO = 0.15
@@ -32,15 +28,9 @@ def detect_blocks(img: np.ndarray,
 
 
 def _full_detect(img: np.ndarray) -> List[Block]:
-    """用颜色法检测方块：方块是高饱和度青色，空格没有"""
+    """用颜色方差检测方块：方块有多个颜色（角色头像），空格颜色单一"""
     roi = img[FY:FY + FH, FX:FX + FW]
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-    # 方块颜色掩码
-    mask = cv2.inRange(hsv, BLOCK_LOWER, BLOCK_UPPER)
-    # 形态学去噪声
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                            np.ones((3, 3), np.uint8), iterations=1)
 
     cell_w = FW / GRID_COLS
     cell_h = FH / GRID_ROWS
@@ -53,9 +43,14 @@ def _full_detect(img: np.ndarray) -> List[Block]:
             cw = max(int(cell_w), 1)
             ch = max(int(cell_h), 1)
 
-            cell_mask = mask[cy:cy + ch, cx:cx + cw]
-            color_px = cv2.countNonZero(cell_mask)
-            ratio = color_px / (cw * ch)
+            cell_hsv = hsv[cy:cy + ch, cx:cx + cw]
+
+            # 颜色方差：方块有多个颜色 → 高方差
+            h_std = float(np.std(cell_hsv[:, :, 0]))
+            s_std = float(np.std(cell_hsv[:, :, 1]))
+            v_std = float(np.std(cell_hsv[:, :, 2]))
+            # 综合评分：H 方差权重最高（颜色多样性）
+            score = h_std * 2.0 + s_std * 0.5 + v_std * 0.3
 
             cells.append({
                 "col": col + 1,
@@ -64,21 +59,20 @@ def _full_detect(img: np.ndarray) -> List[Block]:
                 "y": cy + FY,
                 "w": cw,
                 "h": ch,
-                "score": round(ratio * 100, 1),  # 百分比作为 score
+                "score": round(score, 1),
             })
 
-    # 自适应阈值：找分数断层确定哪些格子有方块
+    # 自适应阈值：找分数断层
     scores = sorted([c["score"] for c in cells], reverse=True)
     max_drop = 0
-    threshold = 5.0  # 默认：至少 5% 像素匹配方块颜色
+    threshold = 20.0
     for i in range(1, len(scores)):
         drop = scores[i - 1] - scores[i]
         if drop > max_drop:
             max_drop = drop
             threshold = (scores[i - 1] + scores[i]) / 2
-    # 如果断层不够显著，用默认阈值
-    if max_drop < 3:
-        threshold = 5.0
+    if max_drop < 5:
+        threshold = 20.0  # 没有显著断层时用默认值
 
     blocks = [c for c in cells if c["score"] > threshold]
     blocks.sort(key=lambda b: (b["row"], b["col"]))

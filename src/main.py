@@ -44,6 +44,9 @@ class NikkeOverlayApp:
 
         # 状态
         self._blocks: list = []
+        self._miss_count = 0          # 连续未检测到轨迹线的次数
+        self._last_traj_data = None   # (lx, ly, dx, dy) 上次有效的轨迹
+        self._max_miss = 3            # 最多保持3帧（~450ms）
 
         # 定时器
         self._detect_timer = QTimer(self.app)
@@ -92,7 +95,10 @@ class NikkeOverlayApp:
             # 2. 检测游戏轨迹线（按住拖拽时游戏会画淡青色线）
             traj = detect_trajectory(frame)
             if traj:
+                self._miss_count = 0
+                self._last_traj_data = traj
                 lx, ly, dx, dy = traj
+
                 # 更新发射点显示
                 self.renderer.launch_point = (lx, ly)
 
@@ -105,13 +111,24 @@ class NikkeOverlayApp:
                 self.renderer.status_text = "预测中"
                 self.renderer.status_color = QColor(0, 200, 0)
             else:
-                # 游戏没画轨迹线（没在拖拽）→ 清除预判线
-                if self.renderer.trajectory:
-                    self.renderer.trajectory = []
-                    self.renderer.endpoint = None
-                    self.renderer.is_dragging = False
-                    self.renderer.status_text = "就绪"
-                    self.renderer.status_color = QColor(100, 100, 100)
+                # 没检测到 → 用上次有效结果保持几帧（防闪烁）
+                self._miss_count += 1
+                if self._miss_count < self._max_miss and self._last_traj_data:
+                    # 用缓存的轨迹继续显示
+                    lx, ly, dx, dy = self._last_traj_data
+                    waypoints, reason, col, row = simulate(lx, ly, dx, dy, self._blocks)
+                    self.renderer.trajectory = waypoints
+                    if waypoints:
+                        self.renderer.endpoint = waypoints[-1]
+                else:
+                    # 真的没了 → 清除
+                    if self.renderer.trajectory:
+                        self.renderer.trajectory = []
+                        self.renderer.endpoint = None
+                        self.renderer.is_dragging = False
+                        self._last_traj_data = None
+                        self.renderer.status_text = "就绪"
+                        self.renderer.status_color = QColor(100, 100, 100)
 
         except Exception as e:
             logger.warning(f"检测失败: {e}")

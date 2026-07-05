@@ -36,8 +36,8 @@ def _full_detect(img: np.ndarray) -> List[Block]:
 
     cell_w = FW / GRID_COLS
     cell_h = FH / GRID_ROWS
-    BORDER_INNER = 4    # 边框内缘（px，从格子边缘向内）
-    BORDER_OUTER = 16   # 边框外缘
+    BORDER_INNER = 3    # 边框内缘（px，从格子边缘向内）
+    BORDER_OUTER = 20   # 边框外缘
 
     cells = []
     for row in range(GRID_ROWS):
@@ -79,14 +79,14 @@ def _full_detect(img: np.ndarray) -> List[Block]:
     # 自适应阈值：找显著断层
     scores = sorted([c["score"] for c in cells], reverse=True)
     max_drop = 0
-    threshold = 10.0
+    threshold = 4.0
     for i in range(1, len(scores)):
         drop = scores[i - 1] - scores[i]
         if drop > max_drop:
             max_drop = drop
             threshold = (scores[i - 1] + scores[i]) / 2
-    if max_drop < 3:
-        threshold = 10.0
+    if max_drop < 1:
+        threshold = 4.0
 
     blocks = [c for c in cells if c["score"] > threshold]
     blocks.sort(key=lambda b: (b["row"], b["col"]))

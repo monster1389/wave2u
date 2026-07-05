@@ -88,17 +88,20 @@ class NikkeOverlayApp:
             screenshot = pyautogui.screenshot()
             frame = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
 
-            # 1. 检测方块（帧差法，首次或每30帧做全量检测）
-            blocks = detect_blocks(
-                frame, self._prev_frame, self._blocks,
-                force_full=(self._frame_count % 30 == 0)
-            )
-            self._blocks = blocks
-            self.renderer.blocks = blocks
-            self._frame_count += 1
-
-            # 2. 帧差法检测轨迹线
+            # 2. 帧差法检测轨迹线（先于方块检测）
             traj = detect_trajectory(frame, self._prev_frame)
+
+            # 1. 检测方块：只在轨迹线不出现时更新（避免轨迹干扰）
+            if traj is None:
+                # 没有轨迹线 → 安全更新方块
+                blocks = detect_blocks(
+                    frame, self._prev_frame, self._blocks,
+                    force_full=(self._frame_count % 30 == 0)
+                )
+                self._blocks = blocks
+                self.renderer.blocks = blocks
+                self._frame_count += 1
+
             self._prev_frame = frame.copy()
             if traj:
                 self._miss_count = 0

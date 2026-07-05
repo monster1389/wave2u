@@ -28,7 +28,7 @@ from src.overlay.window import OverlayWindow
 from src.overlay.renderer import Renderer
 from src.overlay.input_handler import InputHandler
 
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("nikke-overlay")
 
 
@@ -125,12 +125,14 @@ class NikkeOverlayApp:
         # 使用点击位置 (sx,sy) 作为发射点，无需等待 CV 检测
         dx = mx - sx
         dy = my - sy
+        logger.debug(f"拖拽: start=({sx},{sy}) mouse=({mx},{my}) dir=({dx},{dy})")
 
         self.renderer.is_dragging = True
         self.renderer.mouse_pos = (mx, my)
 
         # 模拟轨迹
         waypoints, reason, col, row = simulate(sx, sy, dx, dy, self._blocks)
+        logger.debug(f"轨迹: {len(waypoints)} 个路径点, reason={reason}, hit=({col},{row})")
         self.renderer.trajectory = waypoints
         if waypoints:
             self.renderer.endpoint = waypoints[-1]

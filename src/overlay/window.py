@@ -1,19 +1,27 @@
-"""PyQt5 透明覆盖层窗口"""
+"""PyQt5 透明覆盖层窗口
 
+使用全局鼠标钩子（GetAsyncKeyState）检测点击拖拽，
+窗口本身设置 WA_TransparentForMouseEvents=True 让点击穿透到游戏。
+"""
+
+import ctypes
 import logging
 from typing import Optional, Callable
 
-from PyQt5.QtWidgets import QWidget
+from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPainter, QMouseEvent
+from PyQt5.QtGui import QPainter, QCursor
 
 from src.config import OVERLAY_FPS
 
 logger = logging.getLogger("nikke-overlay")
 
+# Windows 虚拟键码
+VK_LBUTTON = 0x01
+
 
 class OverlayWindow(QWidget):
-    """透明、置顶、无边框覆盖层窗口"""
+    """透明、置顶、无边框覆盖层窗口（点击穿透）"""
 
     _paint_count = 0
 
@@ -29,7 +37,7 @@ class OverlayWindow(QWidget):
         self.on_drag_move: Optional[Callable[[int, int, int, int], None]] = None
         self.on_drag_end: Optional[Callable[[int, int, int, int], None]] = None
 
-        # 窗口标志（与测试 B 验证过的组合一致）
+        # 窗口标志
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
@@ -37,11 +45,10 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        # 点击穿透：所有鼠标事件传递到下面的游戏窗口
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
-        # 启用鼠标追踪（不按按钮时也能收到 mouseMoveEvent）
-        self.setMouseTracking(True)
-
-        # 刷新定时器
+        # 刷新定时器（也用于轮询鼠标状态）
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(1000 // OVERLAY_FPS)
@@ -50,48 +57,49 @@ class OverlayWindow(QWidget):
         self._renderer = renderer
 
     def resize_to(self, x: int, y: int, w: int, h: int):
-        """仅当位置/尺寸变化时才设置（避免对已显示窗口重复调用 setGeometry）"""
         current = self.geometry()
         if (x, y, w, h) != (current.x(), current.y(), current.width(), current.height()):
             self.setGeometry(x, y, w, h)
             logger.debug(f"覆盖层位置更新: ({x},{y}) {w}x{h}")
 
     def _tick(self):
+        """每帧：轮询全局鼠标 + 触发重绘"""
+        self._poll_mouse()
         self.update()
 
-    # ── 鼠标事件（与测试 B 验证过的实现一致） ──
+    # ── 全局鼠标轮询（不依赖窗口事件） ──
 
-    def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton:
+    _prev_left = False
+
+    def _poll_mouse(self):
+        """用 Windows API 检测全局鼠标状态"""
+        pos = QCursor.pos()  # 全局屏幕坐标
+        left_down = (ctypes.windll.user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
+
+        if left_down and not self._prev_left:
+            # 鼠标按下
             self._dragging = True
-            self._start_pos = (event.x(), event.y())
-            self._current_pos = (event.x(), event.y())
-            logger.debug(f"鼠标按下: ({event.x()}, {event.y()})")
+            self._start_pos = (pos.x(), pos.y())
+            self._current_pos = (pos.x(), pos.y())
+            logger.debug(f"全局鼠标按下: ({pos.x()}, {pos.y()})")
             if self.on_drag_start:
-                self.on_drag_start(event.x(), event.y())
-            event.accept()
-            return
-        super().mousePressEvent(event)
+                self.on_drag_start(pos.x(), pos.y())
 
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if self._dragging:
-            self._current_pos = (event.x(), event.y())
+        elif left_down and self._prev_left and self._dragging:
+            # 拖拽中
+            self._current_pos = (pos.x(), pos.y())
             if self.on_drag_move and self._start_pos:
                 sx, sy = self._start_pos
-                self.on_drag_move(sx, sy, event.x(), event.y())
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
+                self.on_drag_move(sx, sy, pos.x(), pos.y())
 
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        if self._dragging and event.button() == Qt.LeftButton:
+        elif not left_down and self._prev_left and self._dragging:
+            # 鼠标松开
             self._dragging = False
             if self.on_drag_end and self._start_pos:
                 sx, sy = self._start_pos
                 self.on_drag_end(sx, sy, self._current_pos[0], self._current_pos[1])
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
+
+        self._prev_left = left_down
 
     # ── 绘制 ──
 

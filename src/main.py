@@ -69,7 +69,7 @@ class NikkeOverlayApp:
             if not self.overlay.isVisible():
                 self.overlay.show()
                 logger.info(f"覆盖层已显示: ({x},{y}) {w}x{h}")
-                self._run_detection()
+                logger.info("请在覆盖层上点击并拖拽来查看预判轨迹")
         else:
             if self.overlay.isVisible():
                 self.overlay.hide()

@@ -93,25 +93,17 @@ class NikkeOverlayApp:
             # 2. 帧差法检测轨迹线（先于方块检测）
             traj = detect_trajectory(frame, self._prev_frame)
 
-            # 1. 检测方块：只在轨迹线不出现时更新（避免轨迹干扰）
+            # 1. 检测方块：只在轨迹线不出现时更新
             if traj is None:
-                # 轨迹线刚消失 → 延迟 0.3 秒，期间不更新方块
-                if self._traj_was_present:
-                    self._refresh_delay = 2  # 2帧 ≈ 0.3s
-
-                if self._refresh_delay > 0:
-                    self._refresh_delay -= 1
-                    # 延迟期内不更新方块（避免轨迹残影造成误判）
-                    pass
-                else:
-                    force = self._frame_count % 30 == 0
-                    blocks = detect_blocks(
-                        frame, self._prev_frame, self._blocks,
-                        force_full=force
-                    )
-                    self._blocks = blocks
-                    self.renderer.blocks = blocks
-                    self._frame_count += 1
+                # 去掉延迟，轨迹消失后立刻开始刷新
+                force = self._frame_count % 10 == 0  # 每10帧全量检测
+                blocks = detect_blocks(
+                    frame, self._prev_frame, self._blocks,
+                    force_full=force
+                )
+                self._blocks = blocks
+                self.renderer.blocks = blocks
+                self._frame_count += 1
 
             self._traj_was_present = traj is not None
             self._prev_frame = frame.copy()

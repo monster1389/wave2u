@@ -110,6 +110,7 @@ class NikkeOverlayApp:
 
                 # 3. 模拟完整反弹路径
                 waypoints, reason, col, row = simulate(lx, ly, dx, dy, self._blocks)
+                logger.debug(f"轨迹模拟: {len(waypoints)}点 {reason} hit=({col},{row})")
                 self.renderer.trajectory = waypoints
                 if waypoints:
                     self.renderer.endpoint = waypoints[-1]
@@ -123,6 +124,7 @@ class NikkeOverlayApp:
                     # 用缓存的轨迹继续显示
                     lx, ly, dx, dy = self._last_traj_data
                     waypoints, reason, col, row = simulate(lx, ly, dx, dy, self._blocks)
+                    logger.debug(f"缓存轨迹: {len(waypoints)}点 {reason}")
                     self.renderer.trajectory = waypoints
                     if waypoints:
                         self.renderer.endpoint = waypoints[-1]

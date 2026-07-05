@@ -92,6 +92,24 @@ class Renderer:
             return
 
         total_segments = len(self.trajectory) - 1
+        n = len(self.trajectory)
+
+        # 诊断：每 30 帧打印路径范围
+        self._diag_count = getattr(self, '_diag_count', 0) + 1
+        if self._diag_count % 30 == 0:
+            xs = [p[0] for p in self.trajectory]
+            ys = [p[1] for p in self.trajectory]
+            # 粗略分段：找 y 方向反射点
+            reflections = 0
+            for i in range(2, n):
+                if (self.trajectory[i][1] - self.trajectory[i-1][1]) * \
+                   (self.trajectory[i-1][1] - self.trajectory[i-2][1]) < 0:
+                    reflections += 1
+            import logging
+            logging.getLogger('nikke-overlay').info(
+                f"轨迹绘制: {n}点 {total_segments}段 {reflections}次反射 "
+                f"x=({min(xs)},{max(xs)}) y=({min(ys)},{max(ys)})")
+
         for i in range(total_segments):
             x1, y1 = self.trajectory[i]
             x2, y2 = self.trajectory[i + 1]

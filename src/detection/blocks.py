@@ -47,7 +47,18 @@ def _full_detect(img: np.ndarray) -> List[Block]:
             # Otsu 自适应二值化
             _, thresh = cv2.threshold(cell_gray, 0, 255,
                                       cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            fg_px = cv2.countNonZero(thresh)
+
+            # 去除小连通域（网格线、噪声）
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+                thresh, 8, cv2.CV_32S)
+            clean = np.zeros_like(thresh)
+            fg_px = 0
+            for i in range(1, num_labels):
+                area = stats[i, cv2.CC_STAT_AREA]
+                if area >= 60:  # 面积≥60像素才算
+                    clean[labels == i] = 255
+                    fg_px += area
+
             ratio = fg_px / (cw * ch) * 100
 
             cells.append({

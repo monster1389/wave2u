@@ -65,14 +65,14 @@ def _full_detect(img: np.ndarray) -> List[Block]:
     # 自适应阈值：找分数断层
     scores = sorted([c["score"] for c in cells], reverse=True)
     max_drop = 0
-    threshold = 20.0
+    threshold = 12.0
     for i in range(1, len(scores)):
         drop = scores[i - 1] - scores[i]
         if drop > max_drop:
             max_drop = drop
             threshold = (scores[i - 1] + scores[i]) / 2
-    if max_drop < 5:
-        threshold = 20.0  # 没有显著断层时用默认值
+    if max_drop < 3:
+        threshold = 12.0  # 没有显著断层时用默认值
 
     blocks = [c for c in cells if c["score"] > threshold]
     blocks.sort(key=lambda b: (b["row"], b["col"]))

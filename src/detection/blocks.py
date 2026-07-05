@@ -80,6 +80,19 @@ def _full_detect(img: np.ndarray) -> List[Block]:
             })
 
     blocks = [c for c in cells if c["score"] > SCORE_THRESHOLD]
+    # 如果硬阈值没找到方块，尝试自适应阈值找分数断层
+    if len(blocks) == 0:
+        scores = sorted([c["score"] for c in cells], reverse=True)
+        # 找最大分数下降点
+        max_drop = 0
+        best_thresh = SCORE_THRESHOLD
+        for i in range(1, len(scores)):
+            drop = scores[i-1] - scores[i]
+            if drop > max_drop:
+                max_drop = drop
+                best_thresh = (scores[i-1] + scores[i]) / 2
+        if max_drop > 5:  # 有显著断层
+            blocks = [c for c in cells if c["score"] > best_thresh]
     blocks.sort(key=lambda b: (b["row"], b["col"]))
     return blocks
 

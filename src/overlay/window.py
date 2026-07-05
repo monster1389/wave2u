@@ -1,14 +1,15 @@
 """PyQt5 透明覆盖层窗口
 
-使用全局鼠标钩子（GetAsyncKeyState）检测点击拖拽，
-窗口本身设置 WA_TransparentForMouseEvents=True 让点击穿透到游戏。
+点击穿透使用 Windows API 直接设置 WS_EX_TRANSPARENT（Qt 的
+WA_TransparentForMouseEvents 在此环境无效）。
+鼠标拖拽检测使用全局钩子 GetAsyncKeyState + QCursor。
 """
 
 import ctypes
 import logging
 from typing import Optional, Callable
 
-from PyQt5.QtWidgets import QWidget, QApplication
+from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPainter, QCursor
 
@@ -16,14 +17,23 @@ from src.config import OVERLAY_FPS
 
 logger = logging.getLogger("nikke-overlay")
 
-# Windows 虚拟键码
+# Windows 常量
 VK_LBUTTON = 0x01
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_LAYERED = 0x00080000
+SWP_FRAMECHANGED = 0x0020
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+SWP_NOACTIVATE = 0x0010
+SWP_NOZORDER = 0x0004
 
 
 class OverlayWindow(QWidget):
-    """透明、置顶、无边框覆盖层窗口（点击穿透）"""
+    """透明、置顶、无边框覆盖层窗口"""
 
     _paint_count = 0
+    _clickthrough_applied = False
 
     def __init__(self, renderer=None, parent=None):
         super().__init__(parent)
@@ -45,8 +55,6 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        # 点击穿透：所有鼠标事件传递到下面的游戏窗口
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         # 刷新定时器（也用于轮询鼠标状态）
         self._timer = QTimer(self)
@@ -60,40 +68,67 @@ class OverlayWindow(QWidget):
         current = self.geometry()
         if (x, y, w, h) != (current.x(), current.y(), current.width(), current.height()):
             self.setGeometry(x, y, w, h)
-            logger.debug(f"覆盖层位置更新: ({x},{y}) {w}x{h}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 窗口显示后：通过 Windows API 设置点击穿透
+        QTimer.singleShot(0, self._enable_clickthrough)
+        # 再延迟一次确保生效（模拟"切窗口再切回来"的效果）
+        QTimer.singleShot(500, self._enable_clickthrough)
+
+    def _enable_clickthrough(self):
+        """用 Windows API 设置 WS_EX_TRANSPARENT 实现点击穿透"""
+        try:
+            hwnd = int(self.winId())
+            user32 = ctypes.windll.user32
+
+            # 读取当前扩展样式
+            current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            had_transparent = bool(current & WS_EX_TRANSPARENT)
+
+            # 添加 WS_EX_TRANSPARENT（保留已有样式）
+            new_style = current | WS_EX_TRANSPARENT
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+
+            # SetWindowPos 使样式变更生效
+            user32.SetWindowPos(
+                hwnd, 0, 0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER
+            )
+
+            if not had_transparent:
+                logger.info("已启用点击穿透（WS_EX_TRANSPARENT）")
+                self._clickthrough_applied = True
+        except Exception as e:
+            logger.warning(f"设置点击穿透失败: {e}")
+
+    # ── 全局鼠标轮询 ──
+
+    _prev_left = False
 
     def _tick(self):
         """每帧：轮询全局鼠标 + 触发重绘"""
         self._poll_mouse()
         self.update()
 
-    # ── 全局鼠标轮询（不依赖窗口事件） ──
-
-    _prev_left = False
-
     def _poll_mouse(self):
-        """用 Windows API 检测全局鼠标状态"""
-        pos = QCursor.pos()  # 全局屏幕坐标
+        pos = QCursor.pos()
         left_down = (ctypes.windll.user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0
 
         if left_down and not self._prev_left:
-            # 鼠标按下
             self._dragging = True
             self._start_pos = (pos.x(), pos.y())
             self._current_pos = (pos.x(), pos.y())
-            logger.debug(f"全局鼠标按下: ({pos.x()}, {pos.y()})")
             if self.on_drag_start:
                 self.on_drag_start(pos.x(), pos.y())
 
         elif left_down and self._prev_left and self._dragging:
-            # 拖拽中
             self._current_pos = (pos.x(), pos.y())
             if self.on_drag_move and self._start_pos:
                 sx, sy = self._start_pos
                 self.on_drag_move(sx, sy, pos.x(), pos.y())
 
         elif not left_down and self._prev_left and self._dragging:
-            # 鼠标松开
             self._dragging = False
             if self.on_drag_end and self._start_pos:
                 sx, sy = self._start_pos

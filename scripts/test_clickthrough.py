@@ -86,9 +86,33 @@ class TestC(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # 先运行 Test C 验证问题，然后切换 Test D
+    from PyQt5.QtCore import QTimer
+
+    def run_test_d():
+        log.info("=" * 40)
+        log.info("Test D: SetWindowLongW + SetWindowPos 手动设置 WS_EX_TRANSPARENT")
+        w = TestC()  # 重用 TestC 的类，但手动改样式
+
+        # 手动注入 WS_EX_TRANSPARENT（就是生产代码的修复方案）
+        try:
+            hwnd = int(w.winId())
+            user32 = ctypes.windll.user32
+            current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            new_style = current | WS_EX_TRANSPARENT
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER)
+            after = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            log.info(f"Test D WS_EX: TRANSPARENT={bool(after & WS_EX_TRANSPARENT)}")
+            log.info("Test D: 点击穿透已手动设置，请测试能否点到底层窗口")
+        except Exception as e:
+            log.error(f"Test D 失败: {e}")
+
+    QTimer.singleShot(100, run_test_d)
+    log.info("5秒后自动切换到 Test D...")
+
     w = TestC()
     w.show()
-    log.info("Test C 已显示（蓝色），请尝试点击覆盖层下方的窗口")
-    log.info("如果点击能穿透 → 告诉我")
-    log.info("如果点击不能穿透 → 也告诉我")
     sys.exit(app.exec_())

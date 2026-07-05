@@ -1,22 +1,18 @@
 """小球轨迹模拟：逐步射线投射 + 边界反射"""
 
 from typing import List, Tuple, Optional
-from src.config import FX, FY, FW, FH, STEP_SIZE, MAX_STEPS
+from src.config import FX, FY, FW, FH, STEP_SIZE, MAX_STEPS, BALL_RADIUS
 
 # 终止原因枚举
 HIT_BLOCK = "HIT_BLOCK"
 DROPPED = "DROPPED"
 MAX_STEPS_REACHED = "MAX_STEPS"
 
-# 路径点：(x, y)
 Waypoint = Tuple[int, int]
-
-# 方块描述
 Block = dict  # {col, row, x, y, w, h}
 
 
 def normalize(dx: float, dy: float) -> Tuple[float, float]:
-    """归一化方向向量"""
     length = (dx * dx + dy * dy) ** 0.5
     if length == 0:
         return (0.0, 1.0)
@@ -29,18 +25,9 @@ def simulate(
     blocks: List[Block],
 ) -> Tuple[List[Waypoint], str, Optional[int], Optional[int]]:
     """
-    模拟小球轨迹。
+    模拟小球轨迹（考虑小球半径带来的碰撞偏移）。
 
-    Args:
-        sx, sy: 发射点坐标
-        dx, dy: 方向向量（未归一化也可）
-        blocks: 方块列表 [{col, row, x, y, w, h}, ...]
-
-    Returns:
-        (waypoints, reason, hit_col, hit_row)
-        waypoints: 路径点列表 [(x1,y1), (x2,y2), ...]
-        reason: 终止原因 HIT_BLOCK | DROPPED | MAX_STEPS_REACHED
-        hit_col, hit_row: 击中方块的网格坐标（HIT_BLOCK 时有效）
+    碰撞检测使用球心坐标，但边界/方块碰撞面偏移 BALL_RADIUS 像素。
     """
     dir_x, dir_y = normalize(dx, dy)
     px, py = float(sx), float(sy)
@@ -48,41 +35,49 @@ def simulate(
     hit_col: Optional[int] = None
     hit_row: Optional[int] = None
 
+    # 考虑半径的有效边界
+    top = FY + BALL_RADIUS
+    left = FX + BALL_RADIUS
+    right = FX + FW - BALL_RADIUS
+    bottom = FY + FH
+
     for _ in range(MAX_STEPS):
         px += dir_x * STEP_SIZE
         py += dir_y * STEP_SIZE
 
-        # 底部掉落
-        if py >= FY + FH:
-            waypoints.append((int(px), int(min(py, FY + FH))))
+        # 底部掉落（球心超出底部）
+        if py >= bottom:
+            waypoints.append((int(px), int(min(py, bottom))))
             return (waypoints, DROPPED, None, None)
 
-        # 上边界反射
-        if py <= FY:
-            py = FY + 1  # 拉回边界内侧
+        # 上边界反射（球边触顶）
+        if py <= top:
+            py = top + 1
             dir_y = -dir_y
             waypoints.append((int(px), int(py)))
             continue
 
         # 左边界反射
-        if px <= FX:
-            px = FX + 1
+        if px <= left:
+            px = left + 1
             dir_x = -dir_x
             waypoints.append((int(px), int(py)))
             continue
 
         # 右边界反射
-        if px >= FX + FW:
-            px = FX + FW - 1
+        if px >= right:
+            px = right - 1
             dir_x = -dir_x
             waypoints.append((int(px), int(py)))
             continue
 
-        # 方块碰撞检测
+        # 方块碰撞（考虑球半径：球边界碰方块边界）
         for blk in blocks:
             bx, by = blk["x"], blk["y"]
             bw, bh = blk["w"], blk["h"]
-            if bx <= px <= bx + bw and by <= py <= by + bh:
+            # 球边与方块边的碰撞检测
+            if (px + BALL_RADIUS >= bx and px - BALL_RADIUS <= bx + bw and
+                py + BALL_RADIUS >= by and py - BALL_RADIUS <= by + bh):
                 waypoints.append((int(px), int(py)))
                 hit_col, hit_row = blk["col"], blk["row"]
                 return (waypoints, HIT_BLOCK, hit_col, hit_row)

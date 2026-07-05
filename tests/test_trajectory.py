@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, "src")
 
 from src.physics.trajectory import simulate, HIT_BLOCK, DROPPED, MAX_STEPS_REACHED
-from src.config import FX, FY, FW, FH
+from src.config import FX, FY, FW, FH, BALL_RADIUS
 
 
 def test_drop_straight_down():
@@ -33,7 +33,7 @@ def test_bounce_off_top():
     # 最终向下走: 最后两个点 y 递增
     assert ys[-1] > ys[-2], "最终应向下（y 增大）"
     # 反弹点应在顶部边界附近
-    assert min_y <= FY + 5, f"反弹点应靠近顶部边界 (actual min_y={min_y}, FY={FY})"
+    assert min_y <= FY + BALL_RADIUS + 5, f"反弹点应靠近顶部边界 (actual min_y={min_y}, FY={FY})"
 
 
 def test_bounce_off_side():
@@ -46,7 +46,7 @@ def test_bounce_off_side():
     xs = [p[0] for p in waypoints]
     min_x_idx = xs.index(min(xs))
     assert min_x_idx < len(xs) - 1, "应该有反弹后的点"
-    assert xs[min_x_idx] <= FX + 2, "应该触达左边界"
+    assert xs[min_x_idx] <= FX + BALL_RADIUS + 2, "应该触达左边界（球边）"
 
 
 def test_hit_block():
@@ -85,4 +85,4 @@ def test_degenerate_horizontal():
     assert reason == MAX_STEPS_REACHED, f"expected MAX_STEPS_REACHED, got {reason}"
     # 应该触达右边界
     xs = [p[0] for p in waypoints]
-    assert max(xs) >= FX + FW - 5
+    assert max(xs) >= FX + FW - BALL_RADIUS - 5

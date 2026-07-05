@@ -64,7 +64,7 @@ def _find_best_line(img: np.ndarray,
         diff = cv2.absdiff(roi_curr, roi_prev)
         gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
         # 阈值化：只保留显著变化
-        _, motion = cv2.threshold(gray_diff, 25, 255, cv2.THRESH_BINARY)
+        _, motion = cv2.threshold(gray_diff, 40, 255, cv2.THRESH_BINARY)
         # 形态学开运算去噪声
         motion = cv2.morphologyEx(motion, cv2.MORPH_OPEN,
                                   np.ones((3, 3), np.uint8), iterations=1)
@@ -76,14 +76,14 @@ def _find_best_line(img: np.ndarray,
             np.array([70, 5, 100]), np.array([130, 180, 255]))
 
     motion_px = cv2.countNonZero(source)
-    if motion_px < 80:
+    if motion_px < 150:
         return None
 
     # 边缘检测 + HoughLinesP
-    edges = cv2.Canny(source, 20, 60)
+    edges = cv2.Canny(source, 40, 100)
     lines = cv2.HoughLinesP(
         edges, rho=1, theta=np.pi / 360,
-        threshold=40, minLineLength=50, maxLineGap=30,
+        threshold=60, minLineLength=80, maxLineGap=30,
     )
     if lines is None:
         return None
@@ -91,14 +91,14 @@ def _find_best_line(img: np.ndarray,
     if len(lines.shape) == 3:
         lines = lines[:, 0, :]
 
-    MIN_SCORE = 0.25
+    MIN_SCORE = 0.35
     best_line, best_score = None, -1.0
 
     for l in lines:
         x1, y1, x2, y2 = l
         dx_f, dy_f = x2 - x1, y2 - y1
         length = np.sqrt(dx_f ** 2 + dy_f ** 2)
-        if length < 40:
+        if length < 60:
             continue
 
         # 排除水平/垂直线

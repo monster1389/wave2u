@@ -97,13 +97,12 @@ class NikkeOverlayApp:
                 self.renderer.blocks = blocks
                 logger.info(f"检测到 {len(blocks)} 个方块")
 
-            # 发射点检测（仅首次）
-            if self._launch_point is None:
+            # 发射点检测（仅首次，且仅当用户未手动点击设置时）
+            if self.renderer.launch_point is None:
                 pt = detect_launch_point(frame)
                 if pt:
-                    self._launch_point = pt
                     self.renderer.launch_point = pt
-                    logger.info(f"发射点: {pt}")
+                    logger.info(f"【CV检测】发射点: {pt}")
                     self.renderer.status_text = "Ready"
                     self.renderer.status_color = QColor(0, 200, 0)
                 else:

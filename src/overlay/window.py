@@ -1,5 +1,6 @@
 """PyQt5 透明覆盖层窗口"""
 
+import ctypes
 import logging
 from typing import Optional, Callable
 
@@ -52,10 +53,30 @@ class OverlayWindow(QWidget):
         logger.debug(f"覆盖层位置: ({x},{y}) {w}x{h}")
 
     def _tick(self):
-        """每帧触发的更新"""
         self.update()
 
-    # ── 鼠标事件：直接在窗口上重写，不依赖 eventFilter ──
+    # ── 窗口显示后修复 Windows 点击穿透问题 ──
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 确保窗口创建后重新设置鼠标事件属性
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        # Windows: 清除 WS_EX_TRANSPARENT 标记
+        try:
+            hwnd = int(self.winId())
+            GWL_EXSTYLE = -20
+            WS_EX_TRANSPARENT = 0x00000020
+            WS_EX_LAYERED = 0x00080000
+            user32 = ctypes.windll.user32
+            current = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            # 保留 WS_EX_LAYERED，清除 WS_EX_TRANSPARENT
+            new_style = (current | WS_EX_LAYERED) & ~WS_EX_TRANSPARENT
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+            logger.debug("已清除 WS_EX_TRANSPARENT（Windows 点击穿透）")
+        except Exception as e:
+            logger.warning(f"清除 WS_EX_TRANSPARENT 失败: {e}")
+
+    # ── 鼠标事件 ──
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
@@ -92,7 +113,6 @@ class OverlayWindow(QWidget):
     # ── 绘制 ──
 
     def paintEvent(self, event):
-        """Qt 绘制事件"""
         self._paint_count += 1
         if self._paint_count % 30 == 0:
             has_traj = len(self._renderer.trajectory) if self._renderer else -1

@@ -13,10 +13,6 @@ from src.config import FX, FY, FW, FH
 LINE_COLOUR_LOWER = np.array([85, 15, 180])
 LINE_COLOUR_UPPER = np.array([105, 100, 255])
 
-# 已知锚点
-START_PT = (893, 1054)
-TARGET_PT = (1333, 467)
-
 
 def _make_line_mask(img: np.ndarray) -> np.ndarray:
     """创建轨迹线 HSV 掩码"""
@@ -85,29 +81,32 @@ def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     if lines is None:
         return None
 
-    sx, sy = START_PT
-    tx, ty = TARGET_PT
-    target_dx, target_dy = tx - sx, ty - sy
-    target_len = np.sqrt(target_dx ** 2 + target_dy ** 2)
-
     best_line, best_score = None, -1
+    grid_cy = FY + FH // 2  # 网格垂直中点
+    grid_bottom = FY + FH
+
     for l in lines:
         x1, y1, x2, y2 = l
         dx, dy = x2 - x1, y2 - y1
         length = np.sqrt(dx * dx + dy * dy)
-        if length < 20:
+        if length < 30:
             continue
 
-        # 方向对齐
-        dot = (dx * target_dx + dy * target_dy) / (length * target_len)
-        angle_score = max(0, dot)
+        # 排除水平/垂直线（轨迹线是斜的）
+        angle = abs(dx / max(length, 1))
+        if angle > 0.98 or angle < 0.05:  # 几乎水平或垂直
+            continue
 
-        # 接近锚点
-        d_s = abs((y2 - y1) * (sx - FX - x1) - (x2 - x1) * (sy - FY - y1)) / length
-        d_t = abs((y2 - y1) * (tx - FX - x1) - (x2 - x1) * (ty - FY - y1)) / length
-        proximity = max(0, 1 - (d_s + d_t) / 200)
+        # 线的底部端点应该在网格下半部分
+        bottom_y = max(y1, y2)
+        if bottom_y < FY + FH * 0.4:  # 底部端点太靠上
+            continue
 
-        score = angle_score * 0.4 + proximity * 0.6
+        # 评分：线越长越好，底部端点越靠下越好
+        length_score = min(length / 200, 1.0)
+        bottom_score = (bottom_y - FY) / FH  # 0-1, 越大越靠下
+        score = length_score * 0.5 + bottom_score * 0.5
+
         if score > best_score:
             best_score = score
             best_line = (x1 + FX, y1 + FY, x2 + FX, y2 + FY)

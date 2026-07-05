@@ -1,138 +1,113 @@
 """
-根本原因调查 - Phase 1
-收集当前检测管线在真实游戏画面上的完整行为证据。
+Phase 1: 对比轨迹线偏左 vs 偏右时的检测行为
 """
 
-import sys
-import os
-import time
+import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-import cv2
-import numpy as np
-import pyautogui
-
+import cv2, numpy as np, pyautogui
 from src.config import FX, FY, FW, FH
 from src.detection.launch_point import detect_trajectory
-from src.detection.launch_point import _find_best_line
 
-# HSV 颜色常量（从 launch_point.py 复制，避免 import 循环）
-LINE_HUE_LOWER = 70
-LINE_HUE_UPPER = 130
-LINE_SAT_LOWER = 5
-LINE_SAT_UPPER = 180
+# 取色常量（从 launch_point.py 复制）
+LINE_HUE_LOWER, LINE_HUE_UPPER = 70, 130
+LINE_SAT_LOWER, LINE_SAT_UPPER = 5, 180
 LINE_VAL_LOWER = 100
 
 print("=" * 60)
-print("PHASE 1: 根因证据收集")
+print("PHASE 1: 左右不对称根因调查")
 print("=" * 60)
 
-# ── 截图 ──
-print("\n[证据1] 5秒后截图（请在游戏内拖拽显示轨迹线）...")
 for i in range(5, 0, -1):
     print(f"  {i}...")
     time.sleep(1)
 s = pyautogui.screenshot()
 frame = cv2.cvtColor(np.array(s), cv2.COLOR_RGB2BGR)
-h, w = frame.shape[:2]
-print(f"  截图尺寸: {w}x{h}")
-print(f"  网格区域: ({FX},{FY})-({FX+FW},{FY+FH})")
-
-# ── 证据 A: HSV掩码分析 ──
-print("\n[证据A] HSV颜色掩码分析")
 roi = frame[FY:FY+FH, FX:FX+FW]
 hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-# A1: 当前颜色范围的掩码
-mask_current = cv2.inRange(hsv,
+# ── 证据 A: 左侧 vs 右侧 HSV 分布对比 ──
+print("\n[证据A] 左右半场 HSV 分布对比")
+mid_x = FW // 2
+left_hsv = hsv[:, :mid_x, :]
+right_hsv = hsv[:, mid_x:, :]
+
+# 当前颜色范围的像素数
+mask_all = cv2.inRange(hsv,
     np.array([LINE_HUE_LOWER, LINE_SAT_LOWER, LINE_VAL_LOWER]),
     np.array([LINE_HUE_UPPER, LINE_SAT_UPPER, 255]))
-px_current = cv2.countNonZero(mask_current)
+mask_left = mask_all[:, :mid_x]
+mask_right = mask_all[:, mid_x:]
 
-# A2: 膨胀后的掩码
-kernel = np.ones((5,5), np.uint8)
-mask_dilated = cv2.dilate(mask_current, kernel, iterations=2)
-px_dilated = cv2.countNonZero(mask_dilated)
+px_left = cv2.countNonZero(mask_left)
+px_right = cv2.countNonZero(mask_right)
+area_left = mid_x * FH
+area_right = (FW - mid_x) * FH
+print(f"  左侧: {px_left} 像素 ({px_left/area_left*100:.1f}%)")
+print(f"  右侧: {px_right} 像素 ({px_right/area_right*100:.1f}%)")
 
-print(f"  颜色范围: H={LINE_HUE_LOWER}-{LINE_HUE_UPPER} S={LINE_SAT_LOWER}-{LINE_SAT_UPPER} V={LINE_VAL_LOWER}-255")
-print(f"  掩码白色像素(原始): {px_current} ({px_current/(FW*FH)*100:.1f}%)")
-print(f"  掩码白色像素(膨胀2x): {px_dilated} ({px_dilated/(FW*FH)*100:.1f}%)")
+# ── 证据 B: 不同 HoughLinesP 阈值的候选线条数 ──
+print("\n[证据B] HoughLinesP 阈值 vs 候选线条数")
+kernel = np.ones((3,3), np.uint8)
+mask_close = cv2.morphologyEx(mask_all, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-# A3: 保存掩码图
-mask_rgb = cv2.cvtColor(mask_current, cv2.COLOR_GRAY2BGR)
-cv2.imwrite("docs/images/rca_mask_raw.png", mask_rgb)
-mask_dil_rgb = cv2.cvtColor(mask_dilated, cv2.COLOR_GRAY2BGR)
-cv2.imwrite("docs/images/rca_mask_dilated.png", mask_dil_rgb)
+for thresh in [50, 100, 150, 200, 250, 300]:
+    lines = cv2.HoughLinesP(mask_close, rho=1, theta=np.pi/360,
+                             threshold=thresh, minLineLength=100, maxLineGap=50)
+    n = len(lines) if lines is not None else 0
+    print(f"  threshold={thresh:3d}: {n:4d} 条线段")
 
-# ── 证据 B: HoughLinesP 检测到的线条 ──
-print(f"\n[证据B] HoughLinesP 候选线条")
-
-# B1: 在膨胀掩码上运行 HoughLinesP
-lines = cv2.HoughLinesP(mask_dilated, rho=1, theta=np.pi/360,
-                         threshold=50, minLineLength=60, maxLineGap=30)
-
-# B2: 保存候选线条可视化
-line_img = roi.copy()
-n_lines = 0
+# ── 证据 C: threshold=200 时的线条方向分布 ──
+print("\n[证据C] threshold=200 时的线条方向分布")
+lines = cv2.HoughLinesP(mask_close, rho=1, theta=np.pi/360,
+                         threshold=200, minLineLength=100, maxLineGap=50)
+n_left = n_right = n_vert = n_horiz = 0
 if lines is not None:
     if len(lines.shape) == 3:
         lines = lines[:, 0, :]
-    n_lines = len(lines)
     for l in lines:
         x1, y1, x2, y2 = l
-        cv2.line(line_img, (x1, y1), (x2, y2), (0, 255, 0), 1)
-
-# 标记所有线条的端点
-if lines is not None:
-    for i, l in enumerate(lines[:30]):
+        dx = x2 - x1; dy = y2 - y1
+        length = np.sqrt(dx*dx + dy*dy)
+        if length < 80: continue
+        horiz = abs(dx / max(length, 1))
+        if horiz < 0.08: n_vert += 1; continue
+        if horiz > 0.95: n_horiz += 1; continue
+        # 斜线：偏左还是偏右？
+        if dx < 0: n_left += 1
+        else: n_right += 1
+    print(f"  斜线(偏左): {n_left}")
+    print(f"  斜线(偏右): {n_right}")
+    print(f"  垂直线: {n_vert}")
+    print(f"  水平线: {n_horiz}")
+    print(f"  总计: {n_left + n_right + n_vert + n_horiz}")
+    
+    # 画出来
+    line_img = roi.copy()
+    for l in lines:
         x1, y1, x2, y2 = l
-        length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-        dx, dy = x2-x1, y2-y1
-        horiz = abs(dx / max(length, 1)) if length > 0 else 0
-        max_y = max(y1, y2)
-        min_y = min(y1, y2)
-        upward = max_y - min_y
-        print(f"  候选{i}: ({x1+FX:4d},{y1+FY:4d})→({x2+FX:4d},{y2+FY:4d})  "
-              f"len={length:.0f}  horiz={horiz:.2f}  bottom={FY+max_y:4d}  up={upward:3d}")
+        dx = x2-x1; dy = y2-y1
+        length = np.sqrt(dx*dx + dy*dy)
+        if length < 80: continue
+        horiz = abs(dx / max(length, 1))
+        if horiz < 0.08 or horiz > 0.95: continue
+        # 斜线用青色
+        cv2.line(line_img, (x1, y1), (x2, y2), (0, 255, 255), 3)
+    cv2.imwrite("docs/images/rca_slanted_lines.png", line_img)
+    print(f"\n  斜线可视化: docs/images/rca_slanted_lines.png")
 
-cv2.imwrite("docs/images/rca_candidates.png", line_img)
-print(f"\n  HoughLinesP 总计: {n_lines} 条候选线段")
-print(f"  (前30条已打印)")
-
-# ── 证据 C: detect_trajectory 最终结果 ──
-print(f"\n[证据C] detect_trajectory 最终输出")
+# ── 证据 D: 当前检测结果 ──
+print("\n[证据D] detect_trajectory 结果")
 traj = detect_trajectory(frame)
-result = frame.copy()
-cv2.rectangle(result, (FX, FY), (FX+FW, FY+FH), (0, 0, 255), 2)
-
 if traj:
     lx, ly, dx, dy = traj
-    cv2.line(result, (lx, ly), (lx+dx, ly+dy), (0, 255, 255), 4)
-    cv2.circle(result, (lx, ly), 8, (0, 255, 255), -1)
-    print(f"  检测到: 发射点=({lx},{ly}) 方向=({dx},{dy})")
-    print(f"          顶部端点=({lx+dx},{ly+dy})")
-
-    # 模拟完整路径
+    print(f"  发射点=({lx},{ly}) 方向=({dx},{dy})")
+    print(f"  偏{'左' if dx < 0 else '右'}")
     from src.physics.trajectory import simulate
-    waypoints, reason, col, row = simulate(lx, ly, dx, dy, [])
-    print(f"  模拟路径: {len(waypoints)} 点, 终止={reason}")
-
-    # 画模拟路径
-    for i in range(len(waypoints)-1):
-        cv2.line(result, waypoints[i], waypoints[i+1], (0, 200, 200), 2)
+    wp, reason, col, row = simulate(lx, ly, dx, dy, [])
+    print(f"  路径: {len(wp)}点 终止={reason}")
 else:
     print(f"  未检测到")
-    cv2.putText(result, "NOT DETECTED", (FX+50, FY+50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-cv2.imwrite("docs/images/rca_result.png", result)
-
-print(f"\n[已保存]")
-print(f"  docs/images/rca_mask_raw.png     - HSV颜色掩码（原始）")
-print(f"  docs/images/rca_mask_dilated.png  - 膨胀后掩码")
-print(f"  docs/images/rca_candidates.png    - HoughLinesP候选线条（绿色）")
-print(f"  docs/images/rca_result.png        - 最终检测+模拟路径")
-print(f"\n请查看以上图片，关键问题：")
-print(f"1. rca_mask_raw.png - 轨迹线在白色区域里吗？被覆盖了多少？")
-print(f"2. rca_candidates.png - 绿色线条中有没有正确选中轨迹线？")
-print(f"3. rca_result.png - 最终路径（青色线条）是否正确？")
+print(f"\n请查看 docs/images/rca_slanted_lines.png")
+print(f"青色线条 = threshold=200 时仍然保留的斜线候选")
+print(f"如果右侧有更多青色线条 = 右侧噪声多")

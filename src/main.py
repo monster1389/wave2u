@@ -112,34 +112,37 @@ class NikkeOverlayApp:
             logger.warning(f"检测失败: {e}")
 
     def _on_drag_start(self, sx: int, sy: int):
-        """点击时以鼠标位置为发射起点"""
-        self.renderer.launch_point = (sx, sy)
-        logger.info(f"发射点已设置: ({sx}, {sy})")
-        # 以发射点的网格坐标更新覆盖层位置
-        from src.config import FX, FY, FW, FH
-        if not (FX <= sx <= FX + FW and FY <= sy <= FY + FH):
-            logger.debug(f"点击在网格外 ({sx},{sy})")
+        """点击 → 开始拖拽瞄准"""
+        if self.renderer.launch_point is None:
+            logger.warning("发射点尚未检测到，请等待 CV 检测")
+            return
+        logger.info(f"拖拽开始, 发射点=({self.renderer.launch_point[0]},{self.renderer.launch_point[1]})")
 
     def _on_drag_move(self, sx: int, sy: int, mx: int, my: int):
         """拖拽移动 → 更新预判线"""
-        # 使用点击位置 (sx,sy) 作为发射点，无需等待 CV 检测
-        dx = mx - sx
-        dy = my - sy
-        logger.debug(f"拖拽: start=({sx},{sy}) mouse=({mx},{my}) dir=({dx},{dy})")
+        lp = self.renderer.launch_point
+        if lp is None:
+            return
+        lx, ly = lp
+        # 方向 = 从 CV 检测的发射点到鼠标当前位置
+        dx = mx - lx
+        dy = my - ly
+        logger.debug(f"拖拽: launch=({lx},{ly}) mouse=({mx},{my}) dir=({dx},{dy})")
 
         self.renderer.is_dragging = True
         self.renderer.mouse_pos = (mx, my)
 
         # 模拟轨迹
-        waypoints, reason, col, row = simulate(sx, sy, dx, dy, self._blocks)
+        waypoints, reason, col, row = simulate(lx, ly, dx, dy, self._blocks)
         logger.debug(f"轨迹: {len(waypoints)} 个路径点, reason={reason}, hit=({col},{row})")
         self.renderer.trajectory = waypoints
         if waypoints:
             self.renderer.endpoint = waypoints[-1]
 
     def _on_drag_end(self, sx: int, sy: int, mx: int, my: int):
-        """松开鼠标 → 锁定路径"""
+        """松开鼠标 → 锁定路径（淡显保留参考）"""
         self.renderer.is_dragging = False
+        logger.info(f"拖拽结束, 方向=({mx - self.renderer.launch_point[0]},{my - self.renderer.launch_point[1]})" if self.renderer.launch_point else "拖拽结束")
 
     def run(self):
         """启动应用"""

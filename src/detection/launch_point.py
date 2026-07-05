@@ -1,7 +1,7 @@
 """发射点检测模块
 
-先用边缘检测找网格内所有线条，再用特征评分识别轨迹线。
-不依赖颜色，只依赖"轨迹线是一条斜线，从网格底部发出"这个几何特征。
+混合检测：HSV 颜色定位 + 膨胀连接断线 + 几何评分。
+先用颜色筛选出可能是轨迹线的区域，再找线条。
 """
 
 from typing import Optional, Tuple
@@ -10,25 +10,20 @@ import numpy as np
 
 from src.config import FX, FY, FW, FH
 
+# 轨迹线颜色 — 淡青色 HSV 范围（放宽，配合膨胀使用）
+LINE_HUE_LOWER = 70
+LINE_HUE_UPPER = 130
+LINE_SAT_LOWER = 5
+LINE_SAT_UPPER = 180
+LINE_VAL_LOWER = 100
+
 
 def detect_trajectory(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
-    """
-    检测游戏轨迹线，返回 (launch_x, launch_y, dir_x, dir_y)。
-
-    使用边缘检测 + 线条特征评分，不依赖颜色。
-
-    Args:
-        img: BGR 截图
-
-    Returns:
-        (lx, ly, dx, dy) 或 None
-    """
     result = _find_best_line(img)
     if result is None:
         return None
 
     x1, y1, x2, y2 = result
-    # 底部端点 = 发射点（y 较大的点）
     if y1 > y2:
         lx, ly, tx, ty = x1, y1, x2, y2
     else:
@@ -40,7 +35,6 @@ def detect_trajectory(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
 
 
 def detect_launch_point(img: np.ndarray) -> Optional[Tuple[int, int]]:
-    """检测小球发射点（只返回坐标）"""
     traj = detect_trajectory(img)
     if traj is None:
         return None
@@ -48,65 +42,72 @@ def detect_launch_point(img: np.ndarray) -> Optional[Tuple[int, int]]:
 
 
 def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
-    """用边缘检测找网格内最像轨迹线的线条"""
     roi = img[FY:FY + FH, FX:FX + FW]
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-    # 边缘检测
-    edges = cv2.Canny(gray, 30, 100)
+    # 1. HSV 颜色掩码：定位淡青色轨迹线
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv,
+                       np.array([LINE_HUE_LOWER, LINE_SAT_LOWER, LINE_VAL_LOWER]),
+                       np.array([LINE_HUE_UPPER, LINE_SAT_UPPER, 255]))
 
-    # 统计边缘像素数，太少说明网格内没有显著线条
-    edge_px = cv2.countNonZero(edges)
-    if edge_px < 100:
+    # 2. 膨胀：把虚线连成实线
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.dilate(mask, kernel, iterations=2)
+
+    # 3. 统计颜色像素量
+    color_px = cv2.countNonZero(mask)
+    if color_px < 200:
         return None
 
-    # 霍夫变换找直线
+    # 4. HoughLinesP 在颜色掩码上找线
     lines = cv2.HoughLinesP(
-        edges, rho=1, theta=np.pi / 360,
-        threshold=40, minLineLength=50, maxLineGap=20,
+        mask, rho=1, theta=np.pi / 360,
+        threshold=50, minLineLength=60, maxLineGap=30,
     )
     if lines is None:
         return None
 
+    # lines 可能是 (N,4) 或 (N,1,4) 格式
+    if len(lines.shape) == 3:
+        lines = lines[:, 0, :]  # (N,1,4) → (N,4)
+
+    # 5. 几何评分
     MIN_SCORE = 0.3
     best_line, best_score = None, -1
-    grid_bottom = FY + FH
-    grid_center_x = FX + FW // 2
 
     for l in lines:
         x1, y1, x2, y2 = l
         length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-        if length < 30:
+        if length < 40:
             continue
 
-        # 方向向量
-        dx_f, dy_f = x2 - x1, y2 - y1
+        dx_f = x2 - x1
 
         # 排除水平/垂直线
         horiz = abs(dx_f / max(length, 1))
-        if horiz > 0.95 or horiz < 0.10:
+        if horiz > 0.95 or horiz < 0.08:
             continue
 
-        # 轨迹线从网格底部发出：至少一个端点在网格下半部
         max_y = max(y1, y2)
         min_y = min(y1, y2)
-        if max_y < FH * 0.3:  # 两个端点都在上半部 → 不是
+
+        # 至少一端在网格下半部
+        if max_y < FH * 0.3:
             continue
 
-        # 轨迹线朝上：顶部端点比底部端点至少高 50px
-        top_y = min_y
-        if (max_y - top_y) < 50:
+        # 向上至少 50px
+        if (max_y - min_y) < 50:
             continue
 
-        # 评分：线越长越好，底部越靠下越好，向上幅度越大越好
+        # 评分
         length_score = min(length / 300, 1.0)
         bottom_score = max_y / FH
-        upward_score = min((max_y - top_y) / 200, 1.0)
+        upward_score = min((max_y - min_y) / 200, 1.0)
         score = length_score * 0.35 + bottom_score * 0.35 + upward_score * 0.3
 
         if score > best_score:
             best_score = score
-            best_line = (x1 + FX, y1 + FY, x2 + FX, y2 + FY)
+            best_line = (int(x1 + FX), int(y1 + FY), int(x2 + FX), int(y2 + FY))
 
     if best_score < MIN_SCORE:
         return None

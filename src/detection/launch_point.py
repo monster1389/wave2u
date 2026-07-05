@@ -74,41 +74,50 @@ def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     """找到最佳的轨迹线，返回绝对坐标 (x1,y1,x2,y2)"""
     mask = _make_line_mask(img)
 
+    # 如果掩码中几乎没有白色像素，说明轨迹线不在画面上
+    white_px = cv2.countNonZero(mask)
+    if white_px < 200:  # 至少要有一定量的淡青色像素
+        return None
+
     lines = cv2.HoughLinesP(
         mask, rho=1, theta=np.pi / 360,
-        threshold=30, minLineLength=40, maxLineGap=50,
+        threshold=50, minLineLength=60, maxLineGap=30,  # 调高阈值减少噪声
     )
     if lines is None:
         return None
 
+    MIN_SCORE = 0.35  # 低于此分数的认为是噪声
     best_line, best_score = None, -1
-    grid_cy = FY + FH // 2  # 网格垂直中点
     grid_bottom = FY + FH
 
     for l in lines:
         x1, y1, x2, y2 = l
         dx, dy = x2 - x1, y2 - y1
         length = np.sqrt(dx * dx + dy * dy)
-        if length < 30:
+        if length < 40:
             continue
 
         # 排除水平/垂直线（轨迹线是斜的）
-        angle = abs(dx / max(length, 1))
-        if angle > 0.98 or angle < 0.05:  # 几乎水平或垂直
+        horiz = abs(dx / max(length, 1))
+        if horiz > 0.97 or horiz < 0.08:
             continue
 
-        # 线的底部端点应该在网格下半部分
+        # 底部端点应该在网格下半部分
         bottom_y = max(y1, y2)
-        if bottom_y < FY + FH * 0.4:  # 底部端点太靠上
+        if bottom_y < FY + FH * 0.35:
             continue
 
-        # 评分：线越长越好，底部端点越靠下越好
-        length_score = min(length / 200, 1.0)
-        bottom_score = (bottom_y - FY) / FH  # 0-1, 越大越靠下
+        # 评分
+        length_score = min(length / 250, 1.0)
+        bottom_score = (bottom_y - FY) / FH
         score = length_score * 0.5 + bottom_score * 0.5
 
         if score > best_score:
             best_score = score
             best_line = (x1 + FX, y1 + FY, x2 + FX, y2 + FY)
+
+    # 分数不够 → 拒绝
+    if best_score < MIN_SCORE:
+        return None
 
     return best_line

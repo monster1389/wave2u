@@ -34,6 +34,8 @@ def simulate(
     bottom = FY + FH
 
     for _ in range(MAX_STEPS):
+        # 记录碰撞前位置（用于判断从哪个方向撞上）
+        px_prev, py_prev = px, py
         px += dir_x * STEP_SIZE
         py += dir_y * STEP_SIZE
 
@@ -51,26 +53,24 @@ def simulate(
                     py + BALL_RADIUS >= by and py - BALL_RADIUS <= by + bh):
                 continue
 
-            # 判断从哪个方向撞上方块，反射对应轴向
-            # 从左边撞上（球向右走，碰到方块左缘）
-            if dir_x > 0 and px - BALL_RADIUS < bx:
+            # 用碰撞前位置判断从哪个方向撞上
+            # 球之前在方块左边 → 撞到左面
+            if px_prev + BALL_RADIUS <= bx:
                 px = bx - BALL_RADIUS - 1
                 dir_x = -dir_x
-            # 从右边撞上
-            elif dir_x < 0 and px + BALL_RADIUS > bx + bw:
+            # 球之前在方块右边 → 撞到右面
+            elif px_prev - BALL_RADIUS >= bx + bw:
                 px = bx + bw + BALL_RADIUS + 1
                 dir_x = -dir_x
-            # 从上面撞上
-            if dir_y > 0 and py - BALL_RADIUS < by:
+            # 球之前在方块上面 → 撞到上面
+            if py_prev + BALL_RADIUS <= by:
                 py = by - BALL_RADIUS - 1
                 dir_y = -dir_y
-            # 从下面撞上
-            elif dir_y < 0 and py + BALL_RADIUS > by + bh:
+            # 球之前在方块下面 → 撞到下面
+            elif py_prev - BALL_RADIUS >= by + bh:
                 py = by + bh + BALL_RADIUS + 1
                 dir_y = -dir_y
 
-            key = (blk["col"], blk["row"])
-            hit_count[key] = hit_count.get(key, 0) + 1
             block_hit = True
             break  # 一次只处理一个方块
 

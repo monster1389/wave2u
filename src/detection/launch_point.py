@@ -59,10 +59,10 @@ def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     if color_px < 200:
         return None
 
-    # 4. HoughLinesP 在颜色掩码上找线
+    # 4. HoughLinesP：高阈值，只接受非常显著的线条（953条→0-2条）
     lines = cv2.HoughLinesP(
         mask, rho=1, theta=np.pi / 360,
-        threshold=50, minLineLength=40, maxLineGap=30,
+        threshold=200, minLineLength=100, maxLineGap=50,
     )
     if lines is None:
         return None
@@ -78,7 +78,7 @@ def _find_best_line(img: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     for l in lines:
         x1, y1, x2, y2 = l
         length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-        if length < 40:
+        if length < 80:
             continue
 
         dx_f = x2 - x1

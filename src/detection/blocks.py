@@ -23,19 +23,16 @@ def detect_blocks(img: np.ndarray,
                   prev_img: Optional[np.ndarray] = None,
                   prev_blocks: Optional[List[Block]] = None,
                   force_full: bool = False,
-                  traj_line: Optional[tuple] = None,
                   ) -> List[Block]:
-    """
-    Args:
-        traj_line: (lx, ly, dx, dy) 当前轨迹线，用于排除干扰
-    """
     if prev_img is None or prev_blocks is None or force_full:
-        return _full_detect(img)
-    return _diff_update(img, prev_img, prev_blocks, traj_line)
+        return _full_detect(img, prev_blocks)
+    return _diff_update(img, prev_img, prev_blocks)
 
 
-def _full_detect(img: np.ndarray) -> List[Block]:
-    """多尺度方差 + Sobel 梯度 + 灰度标准差（原始方法）"""
+def _full_detect(img: np.ndarray,
+                 prev_blocks: Optional[List[Block]] = None
+                 ) -> List[Block]:
+    """多尺度方差 + Sobel 梯度 + 灰度标准差，带滞后滤波"""
     roi = img[FY:FY + FH, FX:FX + FW]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
@@ -47,7 +44,9 @@ def _full_detect(img: np.ndarray) -> List[Block]:
     cell_w = FW / GRID_COLS
     cell_h = FH / GRID_ROWS
 
-    cells = []
+    # 当前帧的原始检测
+    raw_blocks = []
+    raw_empty = []
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
             cx = int(col * cell_w); cy = int(row * cell_h)
@@ -56,14 +55,48 @@ def _full_detect(img: np.ndarray) -> List[Block]:
             edge = np.mean(mag_map[cy:cy + ch, cx:cx + cw])
             std = np.std(gray[cy:cy + ch, cx:cx + cw])
             score = var * 1.0 + edge * 0.02 + std * 0.5
+            detected = score > 40
 
-            cells.append({"col": col + 1, "row": row + 1,
-                          "x": cx + FX, "y": cy + FY,
-                          "w": cw, "h": ch, "score": round(score, 1)})
+            cell = {"col": col + 1, "row": row + 1,
+                    "x": cx + FX, "y": cy + FY,
+                    "w": cw, "h": ch, "score": round(score, 1)}
+            if detected:
+                raw_blocks.append(cell)
+            else:
+                raw_empty.append(cell)
 
-    blocks = [c for c in cells if c["score"] > 40]
-    blocks.sort(key=lambda b: (b["row"], b["col"]))
-    return blocks
+    # 滞后滤波：没有 prev_blocks 时直接用原始检测
+    if prev_blocks is None:
+        raw_blocks.sort(key=lambda b: (b["row"], b["col"]))
+        return raw_blocks
+
+    # 有 prev_blocks 时：当前有方块 → 保留；当前无方块 → 延迟 3 帧才移除
+    prev_set = {(b["col"], b["row"]) for b in prev_blocks}
+    raw_set = {(b["col"], b["row"]) for b in raw_blocks}
+
+    # 初始化持久计数器（存储在函数属性中）
+    if not hasattr(_full_detect, "_persist"):
+        _full_detect._persist = {}
+
+    persist = _full_detect._persist
+    result = []
+
+    for blk in prev_blocks:
+        key = (blk["col"], blk["row"])
+        if key in raw_set:
+            # 连续检测到 → 保留
+            persist[key] = 0
+            result.append(blk)
+        else:
+            # 当前帧没检测到 → 计数器+1
+            persist[key] = persist.get(key, 0) + 1
+            if persist[key] < 3:  # 连续 3 帧没检测到才移除
+                result.append(blk)
+            else:
+                persist.pop(key, None)
+
+    result.sort(key=lambda b: (b["row"], b["col"]))
+    return result
 
 
 def multi_scale_variance(gray: np.ndarray, windows: list[int]) -> np.ndarray:
@@ -76,8 +109,7 @@ def multi_scale_variance(gray: np.ndarray, windows: list[int]) -> np.ndarray:
 
 
 def _diff_update(img: np.ndarray, prev_img: np.ndarray,
-                 prev_blocks: List[Block],
-                 traj_line: Optional[tuple] = None) -> List[Block]:
+                 prev_blocks: List[Block]) -> List[Block]:
     """帧差法检测方块消除"""
     roi_curr = img[FY:FY + FH, FX:FX + FW]
     roi_prev = prev_img[FY:FY + FH, FX:FX + FW]

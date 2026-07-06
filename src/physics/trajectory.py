@@ -53,23 +53,34 @@ def simulate(
                     py + BALL_RADIUS >= by and py - BALL_RADIUS <= by + bh):
                 continue
 
-            # 用碰撞前位置判断从哪个方向撞上
-            # 球之前在方块左边 → 撞到左面
-            if px_prev + BALL_RADIUS <= bx:
-                px = bx - BALL_RADIUS - 1
-                dir_x = -dir_x
-            # 球之前在方块右边 → 撞到右面
-            elif px_prev - BALL_RADIUS >= bx + bw:
-                px = bx + bw + BALL_RADIUS + 1
-                dir_x = -dir_x
-            # 球之前在方块上面 → 撞到上面
-            if py_prev + BALL_RADIUS <= by:
-                py = by - BALL_RADIUS - 1
-                dir_y = -dir_y
-            # 球之前在方块下面 → 撞到下面
-            elif py_prev - BALL_RADIUS >= by + bh:
-                py = by + bh + BALL_RADIUS + 1
-                dir_y = -dir_y
+            # 计算各方向穿透距离，角碰撞时只反射穿透更大的轴
+            pen_x = 0
+            if px_prev + BALL_RADIUS <= bx:  # 从左边来
+                pen_x = (px + BALL_RADIUS) - bx
+            elif px_prev - BALL_RADIUS >= bx + bw:  # 从右边来
+                pen_x = (bx + bw) - (px - BALL_RADIUS)
+
+            pen_y = 0
+            if py_prev + BALL_RADIUS <= by:  # 从上面来
+                pen_y = (py + BALL_RADIUS) - by
+            elif py_prev - BALL_RADIUS >= by + bh:  # 从下面来
+                pen_y = (by + bh) - (py - BALL_RADIUS)
+
+            # 穿透更大的轴决定反射方向
+            if abs(pen_x) >= abs(pen_y):
+                if px_prev + BALL_RADIUS <= bx:
+                    px = bx - BALL_RADIUS - 1
+                    dir_x = -dir_x
+                elif px_prev - BALL_RADIUS >= bx + bw:
+                    px = bx + bw + BALL_RADIUS + 1
+                    dir_x = -dir_x
+            else:
+                if py_prev + BALL_RADIUS <= by:
+                    py = by - BALL_RADIUS - 1
+                    dir_y = -dir_y
+                elif py_prev - BALL_RADIUS >= by + bh:
+                    py = by + bh + BALL_RADIUS + 1
+                    dir_y = -dir_y
 
             block_hit = True
             break  # 一次只处理一个方块

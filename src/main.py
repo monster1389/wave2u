@@ -14,6 +14,7 @@ Usage:
 
 import sys
 import logging
+import ctypes
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer
@@ -93,10 +94,11 @@ class NikkeOverlayApp:
             # 2. 帧差法检测轨迹线（先于方块检测）
             traj = detect_trajectory(frame, self._prev_frame)
 
-            # 1. 检测方块：只在轨迹线不出现时更新
-            if traj is None:
+            # 1. 检测方块：只在轨迹线不出现且鼠标没按下时更新
+            mouse_down = (ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000) != 0
+            if traj is None and not mouse_down:
                 # 去掉延迟，轨迹消失后立刻开始刷新
-                force = self._frame_count % 10 == 0  # 每10帧全量检测
+                force = self._frame_count % 2 == 0  # 每2帧全量检测
                 blocks = detect_blocks(
                     frame, self._prev_frame, self._blocks,
                     force_full=force

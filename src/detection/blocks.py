@@ -61,17 +61,7 @@ def _full_detect(img: np.ndarray) -> List[Block]:
                           "x": cx + FX, "y": cy + FY,
                           "w": cw, "h": ch, "score": round(score, 1)})
 
-    # 自适应阈值找断层
-    scores = sorted([c["score"] for c in cells], reverse=True)
-    max_drop, threshold = 0, 50.0
-    for i in range(1, len(scores)):
-        drop = scores[i - 1] - scores[i]
-        if drop > max_drop:
-            max_drop, threshold = drop, (scores[i - 1] + scores[i]) / 2
-    if max_drop < 5:
-        threshold = 50.0
-
-    blocks = [c for c in cells if c["score"] > threshold]
+    blocks = [c for c in cells if c["score"] > 40]
     blocks.sort(key=lambda b: (b["row"], b["col"]))
     return blocks
 

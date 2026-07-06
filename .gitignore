@@ -10,12 +10,14 @@ __pycache__/
 .superpowers
 docs/superpowers
 
-# IDE
-.vscode/
-.idea/
+# User config
+grid_config.json
 
 # Release
 dist/
 release/
 点我启动.bat
 setup.bat
+
+# User config
+grid_config.json

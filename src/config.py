@@ -1,5 +1,8 @@
 """全局常量配置"""
 
+import json
+import os
+
 # ── 网格区域（与 scripts/detect_blocks.py 一致） ──
 FX = 800   # 网格左上角 x
 FY = 210   # 网格左上角 y
@@ -7,6 +10,19 @@ FW = 637   # 网格宽度
 FH = 845   # 网格高度
 GRID_COLS = 6
 GRID_ROWS = 8
+
+# ── 从校准文件加载（覆盖默认值） ──
+_config_path = os.path.join(os.path.dirname(__file__), "..", "grid_config.json")
+if os.path.exists(_config_path):
+    try:
+        with open(_config_path) as _f:
+            _cfg = json.load(_f)
+        FX = int(_cfg["fx"])
+        FY = int(_cfg["fy"])
+        FW = int(_cfg["fw"])
+        FH = int(_cfg["fh"])
+    except Exception:
+        pass  # fall back to defaults
 
 # ── 轨迹模拟 ──
 STEP_SIZE = 2       # 每步推进像素
